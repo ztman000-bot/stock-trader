@@ -6,13 +6,18 @@ if not exist ".venv\Scripts\python.exe" exit /b 1
 set "LOCKDIR=%TEMP%\stock_trader_start.lock"
 set "BOOTLOG=%TEMP%\stock_trader_bootstrap.log"
 
-rem Fast-path: never launch a duplicate listener.
+rem v0.12 scanner policy: broad safe-universe scan -> active focus -> strategy TOP10.
+rem 180 is deliberately below the hard 240 cap to keep one REST sweep practical.
+set "MASTER_PRESELECT=180"
+set "FOCUS_SIZE=40"
+set "MIN_MARKET_CAP_EOK=500"
+set "MIN_TRADE_PRICE=1000"
+set "MAX_SPREAD_PCT=0.25"
+set "MIN_INTRADAY_RANGE_PCT=0.50"
+
 netstat -ano | findstr /R /C:":8000 .*LISTENING" >nul 2>&1
 if not errorlevel 1 exit /b 0
 
-rem Atomic directory mutex. v0.11.1 could leave this directory behind if the
-rem starter itself was killed during an update. Recover a stale lock only when
-rem the port is still down after a short grace period.
 2>nul mkdir "%LOCKDIR%"
 if errorlevel 1 (
   timeout /t 4 /nobreak >nul
@@ -37,7 +42,7 @@ echo [%date% %time%] ERROR: health timeout. See %RUNLOG% >> "%BOOTLOG%"
 goto :done
 
 :online
-echo [%date% %time%] ONLINE. >> "%BOOTLOG%"
+echo [%date% %time%] ONLINE. scanner=180 focus=40 >> "%BOOTLOG%"
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; try { Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/market/backfill' -TimeoutSec 300 | Out-Null } catch {}" >nul 2>&1
 
 :done
