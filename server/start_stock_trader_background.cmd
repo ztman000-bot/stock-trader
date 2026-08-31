@@ -3,20 +3,29 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" exit /b 1
-
-rem Cross-process start mutex. Prevent watchdog/update/autostart from racing.
 set "LOCKDIR=%TEMP%\stock_trader_start.lock"
-2>nul mkdir "%LOCKDIR%"
-if errorlevel 1 exit /b 0
+set "BOOTLOG=%TEMP%\stock_trader_bootstrap.log"
 
-rem Always release the mutex through :done.
+rem Fast-path: never launch a duplicate listener.
 netstat -ano | findstr /R /C:":8000 .*LISTENING" >nul 2>&1
-if not errorlevel 1 goto :done
+if not errorlevel 1 exit /b 0
 
-rem Fast boot. Use a per-launch log file so stale processes can never lock the
-rem next launch's stdout/stderr target.
+rem Atomic directory mutex. v0.11.1 could leave this directory behind if the
+rem starter itself was killed during an update. Recover a stale lock only when
+rem the port is still down after a short grace period.
+2>nul mkdir "%LOCKDIR%"
+if errorlevel 1 (
+  timeout /t 4 /nobreak >nul
+  netstat -ano | findstr /R /C:":8000 .*LISTENING" >nul 2>&1
+  if not errorlevel 1 exit /b 0
+  2>nul rmdir "%LOCKDIR%"
+  2>nul mkdir "%LOCKDIR%"
+  if errorlevel 1 exit /b 0
+)
+
 set "AUTO_BACKFILL=false"
 set "RUNLOG=%TEMP%\stock_trader_server_%RANDOM%_%RANDOM%.log"
+echo [%date% %time%] Launching uvicorn. log=%RUNLOG% >> "%BOOTLOG%"
 start "" /b ".venv\Scripts\python.exe" -m uvicorn unified_app:app --host 0.0.0.0 --port 8000 >> "%RUNLOG%" 2>&1
 
 for /L %%N in (1,1,30) do (
@@ -24,11 +33,12 @@ for /L %%N in (1,1,30) do (
   if not errorlevel 1 goto :online
   timeout /t 1 /nobreak >nul
 )
+echo [%date% %time%] ERROR: health timeout. See %RUNLOG% >> "%BOOTLOG%"
 goto :done
 
 :online
-rem Backfill only after API health is confirmed.
-start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 1; try { Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/market/backfill' -TimeoutSec 180 | Out-Null } catch {}" >nul 2>&1
+echo [%date% %time%] ONLINE. >> "%BOOTLOG%"
+start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; try { Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/market/backfill' -TimeoutSec 300 | Out-Null } catch {}" >nul 2>&1
 
 :done
 2>nul rmdir "%LOCKDIR%"
