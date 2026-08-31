@@ -10,7 +10,10 @@ INITIAL_CAPITAL = 10_000_000.0
 RISK_PER_TRADE = 0.0035
 STOP_PCT = 0.010
 TARGET_PCT = 0.015
+TRAIL_ACTIVATE_PCT = 0.015
 TRAIL_PCT = 0.008
+BREAKEVEN_ACTIVATE_PCT = 0.008
+BREAKEVEN_BUFFER_PCT = 0.001
 MAX_CONSECUTIVE_LOSSES = 2
 MIN_BARS = 35
 BUY_SCORE = 75
@@ -213,9 +216,12 @@ def mark_positions():
         if peak!=float(p['peak_price'] or entry):
             with _conn() as conn: conn.execute('UPDATE paper_trades SET peak_price=? WHERE id=?',(peak,p['id']))
         reason=None
+        # Hard loss cap stays mechanical. Once a trade proves itself, protect the
+        # position near breakeven. At +1.5% we do not cut a strong trend short;
+        # the trade graduates to an 0.8% peak trailing stop.
         if market<=entry*(1-STOP_PCT): reason='STOP_LOSS'
-        elif market>=entry*(1+TARGET_PCT): reason='TARGET'
-        elif peak>=entry*1.006 and market<=peak*(1-TRAIL_PCT): reason='TRAILING_STOP'
+        elif peak>=entry*(1+TRAIL_ACTIVATE_PCT) and market<=peak*(1-TRAIL_PCT): reason='TRAILING_STOP'
+        elif peak>=entry*(1+BREAKEVEN_ACTIVATE_PCT) and market<=entry*(1+BREAKEVEN_BUFFER_PCT): reason='BREAKEVEN_PROTECT'
         if reason:
             result=close_position(p['id'],market,reason)
             if result: closed.append(result)
