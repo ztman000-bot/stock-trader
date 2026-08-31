@@ -19,7 +19,7 @@ DASHBOARD = BASE_DIR / 'unified_dashboard.html'
 CLASSIC_INDEX = ROOT_DIR / 'index.html'
 UPDATE_SCRIPT = BASE_DIR / 'remote_update.cmd'
 UPDATE_LAUNCHER = BASE_DIR / 'remote_update.vbs'
-UI_VERSION = '0.12.0'
+UI_VERSION = '0.12.1'
 _UPDATE = {'running': False, 'requestedAt': None, 'lastError': None}
 _UPDATE_LOCK = threading.Lock()
 
@@ -56,36 +56,25 @@ async def update_run(request: Request):
     threading.Thread(target=_launch_update_after_response,daemon=True,name='remote-update-launcher').start()
     return JSONResponse({'ok':True,'accepted':True,'uiVersion':UI_VERSION,'message':'업데이트 요청 접수 완료. 안전 재시작을 시작합니다.'})
 
-async def update_status(request: Request):
-    return JSONResponse({'ok':True,'uiVersion':UI_VERSION,**_UPDATE})
-
+async def update_status(request: Request): return JSONResponse({'ok':True,'uiVersion':UI_VERSION,**_UPDATE})
 async def ui_health(request: Request):
     checks={'index':CLASSIC_INDEX.is_file(),'css':(ROOT_DIR/'styles.css').is_file(),'liveJs':(ROOT_DIR/'js'/'live-app.js').is_file()}
     return JSONResponse({'ok':all(checks.values()),'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'checks':checks},status_code=200 if all(checks.values()) else 503)
-
-def _ensure_route(path, endpoint, methods=None, name=None):
+def _ensure_route(path,endpoint,methods=None,name=None):
     for r in app.router.routes:
-        if getattr(r,'path',None)==path: return
+        if getattr(r,'path',None)==path:return
     app.router.routes.append(Route(path,endpoint=endpoint,methods=methods or ['GET'],name=name))
-
-_ensure_route('/api/system/update/run',update_run,['POST'],'system_update_run')
-_ensure_route('/api/system/update/status',update_status,['GET'],'system_update_status')
-_ensure_route('/api/system/ui-health',ui_health,['GET'],'system_ui_health')
+_ensure_route('/api/system/update/run',update_run,['POST'],'system_update_run');_ensure_route('/api/system/update/status',update_status,['GET'],'system_update_status');_ensure_route('/api/system/ui-health',ui_health,['GET'],'system_ui_health')
 for r in list(app.router.routes):
-    if getattr(r,'path',None)=='/': app.router.routes.remove(r)
-async def root_redirect(request: Request): return RedirectResponse(url='/classic')
-async def classic(request: Request): return FileResponse(CLASSIC_INDEX)
-async def dashboard(request: Request): return FileResponse(DASHBOARD)
+    if getattr(r,'path',None)=='/':app.router.routes.remove(r)
+async def root_redirect(request: Request):return RedirectResponse(url='/classic')
+async def classic(request: Request):return FileResponse(CLASSIC_INDEX)
+async def dashboard(request: Request):return FileResponse(DASHBOARD)
 async def root_asset(request: Request):
     name=request.url.path.lstrip('/')
-    if name not in {'styles.css','manifest.webmanifest','sw.js'}: return JSONResponse({'detail':'Not found'},404)
-    p=ROOT_DIR/name
-    return FileResponse(p) if p.is_file() else JSONResponse({'detail':'Not found'},404)
-app.router.routes.append(Route('/',root_redirect,methods=['GET']))
-app.router.routes.append(Route('/classic',classic,methods=['GET']))
-app.router.routes.append(Route('/classic/',classic,methods=['GET']))
-app.router.routes.append(Route('/mobile',dashboard,methods=['GET']))
-app.router.routes.append(Route('/dashboard',dashboard,methods=['GET']))
-for name in ['styles.css','manifest.webmanifest','sw.js']: app.router.routes.append(Route('/'+name,root_asset,methods=['GET']))
-if (ROOT_DIR/'js').exists(): app.router.routes.append(Mount('/js',app=StaticFiles(directory=str(ROOT_DIR/'js')),name='root-js'))
-if (ROOT_DIR/'icons').exists(): app.router.routes.append(Mount('/icons',app=StaticFiles(directory=str(ROOT_DIR/'icons')),name='root-icons'))
+    if name not in {'styles.css','manifest.webmanifest','sw.js'}:return JSONResponse({'detail':'Not found'},404)
+    p=ROOT_DIR/name;return FileResponse(p) if p.is_file() else JSONResponse({'detail':'Not found'},404)
+app.router.routes.append(Route('/',root_redirect,methods=['GET']));app.router.routes.append(Route('/classic',classic,methods=['GET']));app.router.routes.append(Route('/classic/',classic,methods=['GET']));app.router.routes.append(Route('/mobile',dashboard,methods=['GET']));app.router.routes.append(Route('/dashboard',dashboard,methods=['GET']))
+for name in ['styles.css','manifest.webmanifest','sw.js']:app.router.routes.append(Route('/'+name,root_asset,methods=['GET']))
+if (ROOT_DIR/'js').exists():app.router.routes.append(Mount('/js',app=StaticFiles(directory=str(ROOT_DIR/'js')),name='root-js'))
+if (ROOT_DIR/'icons').exists():app.router.routes.append(Mount('/icons',app=StaticFiles(directory=str(ROOT_DIR/'icons')),name='root-icons'))
