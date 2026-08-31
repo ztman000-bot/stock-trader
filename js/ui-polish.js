@@ -1,18 +1,18 @@
-// v0.10 mobile control polish. Pure presentation layer; no trading logic.
+// v0.13 mobile app shell. Presentation only; trading logic untouched.
 const style=document.createElement('style');
 style.textContent=`
-#scanBtn.scan-action,#remoteUpdateBtn.secondary-action,#nhCheckBtn.utility-action{white-space:nowrap;letter-spacing:-.2px;box-shadow:none;transition:transform .12s ease,opacity .12s ease,background .12s ease}
-#scanBtn.scan-action:active,#remoteUpdateBtn.secondary-action:active,#nhCheckBtn.utility-action:active{transform:scale(.97)}
-#scanBtn.scan-action{min-width:104px;border-radius:12px;padding:10px 14px;background:#5ee0a3;color:#052117;font-size:13px}
-#remoteUpdateBtn.secondary-action{border-radius:12px;padding:9px 13px;background:#16243a;color:#dbe8f8;border:1px solid #33445f;font-size:12px}
-#nhCheckBtn.utility-action{border-radius:12px;background:#163a30;color:#8cf0c0;border:1px solid #245e4b}
-@media(max-width:520px){
-  .main-grid article .panel-head{align-items:center;gap:8px}
-  .main-grid article .panel-head>div{min-width:0;flex:1}
-  #scanBtn.scan-action{min-width:92px;min-height:40px;padding:8px 11px;font-size:12px;flex:0 0 auto}
-  #remoteUpdateBtn.secondary-action{min-height:40px;padding:8px 10px;font-size:11px;flex:0 0 auto!important}
-  #nhCheckBtn.utility-action{min-height:40px;font-size:12px}
-  .connection-panel .panel-head{gap:8px}
+#scanBtn.scan-action,#remoteUpdateBtn.secondary-action,#nhCheckBtn.utility-action{white-space:nowrap;box-shadow:none}
+.mobile-nav{display:none}.mobile-page-title{display:none}
+@media(max-width:520px){body{padding-bottom:70px}.wrap{padding-bottom:12px}.mobile-nav{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:100;background:rgba(9,16,29,.97);border-top:1px solid var(--line);padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));backdrop-filter:blur(12px)}.mobile-nav button{border:0;background:transparent;color:var(--muted);font-weight:800;font-size:10px;min-height:48px;border-radius:10px}.mobile-nav button.active{background:#12243a;color:#6ea8fe}.mobile-nav b{display:block;font-size:17px;margin-bottom:2px}.mobile-tab-hidden{display:none!important}.mobile-page-title{display:block;margin:5px 2px 8px;font-size:12px;color:var(--muted)}
+body[data-mobile-tab="home"] .metrics{display:grid}body[data-mobile-tab="home"] .connection-panel{display:block}body[data-mobile-tab="home"] .main-grid{display:flex}body[data-mobile-tab="home"] .main-grid>article{display:block}body[data-mobile-tab="home"] .main-grid>aside{display:block}body[data-mobile-tab="home"] .chart-grid,body[data-mobile-tab="home"] .lower-grid,body[data-mobile-tab="home"] .wrap>section.card.panel:last-of-type{display:none}
+body[data-mobile-tab="top"] .metrics,body[data-mobile-tab="top"] .connection-panel,body[data-mobile-tab="top"] .main-grid>aside,body[data-mobile-tab="top"] .chart-grid,body[data-mobile-tab="top"] .lower-grid,body[data-mobile-tab="top"] .wrap>section.card.panel:last-of-type{display:none}body[data-mobile-tab="top"] .main-grid{display:block;margin-top:0}body[data-mobile-tab="top"] .main-grid>article{display:block}
+body[data-mobile-tab="chart"] .metrics,body[data-mobile-tab="chart"] .connection-panel,body[data-mobile-tab="chart"] .main-grid,body[data-mobile-tab="chart"] .lower-grid,body[data-mobile-tab="chart"] .wrap>section.card.panel:last-of-type{display:none}body[data-mobile-tab="chart"] .chart-grid{display:grid;margin-top:0}
+body[data-mobile-tab="learn"] .metrics,body[data-mobile-tab="learn"] .connection-panel,body[data-mobile-tab="learn"] .main-grid,body[data-mobile-tab="learn"] .chart-grid{display:none}body[data-mobile-tab="learn"] .lower-grid{display:grid}body[data-mobile-tab="learn"] .wrap>section.card.panel:last-of-type{display:block}
+body[data-mobile-tab="home"] .main-grid article .table-wrap{max-height:250px;overflow:hidden}body[data-mobile-tab="home"] .main-grid article tr.pick-row:nth-of-type(n+4){display:none!important}body[data-mobile-tab="home"] .main-grid article .panel-head h2{font-size:0}body[data-mobile-tab="home"] .main-grid article .panel-head h2:after{content:'현재 BUY 후보 TOP 3';font-size:14px}body[data-mobile-tab="home"] .main-grid article .panel-head p{display:none}
+#scanBtn.scan-action{min-width:88px;border-radius:12px;padding:8px 11px;background:#5ee0a3;color:#052117;font-size:11px}#remoteUpdateBtn.secondary-action{border-radius:12px;padding:8px 10px;background:#16243a;color:#dbe8f8;border:1px solid #33445f;font-size:11px}#nhCheckBtn.utility-action{border-radius:12px;background:#163a30;color:#8cf0c0;border:1px solid #245e4b}
 }
 `;
 document.head.appendChild(style);
+
+function makeNav(){if(!matchMedia('(max-width:520px)').matches||document.querySelector('.mobile-nav'))return;const nav=document.createElement('nav');nav.className='mobile-nav';nav.innerHTML=`<button data-tab="home"><b>⌂</b>대시보드</button><button data-tab="top"><b>☷</b>TOP10</button><button data-tab="chart"><b>⌁</b>차트·매매</button><button data-tab="learn"><b>▣</b>학습·로그</button>`;document.body.appendChild(nav);const setTab=t=>{document.body.dataset.mobileTab=t;localStorage.setItem('daytrader-mobile-tab',t);nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));scrollTo({top:0,behavior:'instant'})};nav.querySelectorAll('button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));setTab(localStorage.getItem('daytrader-mobile-tab')||'home');window.dayTraderMobileTab=setTab}
+makeNav();
