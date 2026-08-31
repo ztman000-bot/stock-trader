@@ -16,6 +16,7 @@ from paper_engine import (
  _ema,_rsi,_wilder_adx,_vwap)
 KST=ZoneInfo('Asia/Seoul');CONTROL_STRATEGY='v0.8.0 LOCKED'
 ENTRY_START=570;ENTRY_CUTOFF=890;EOD_EXIT=915
+RESEARCH_ONLY_CODES={'069500','229200'}  # market-regime ETF proxies, never trade/backtest candidates
 
 def _dt(v):return datetime.fromisoformat(str(v)).astimezone(KST)
 def _load_rows(code,start=None,end=None):
@@ -27,7 +28,7 @@ def _load_rows(code,start=None,end=None):
   c.row_factory=sqlite3.Row;return [dict(r) for r in c.execute(sql,args)]
 def available_codes():
  with sqlite3.connect(DB_PATH,timeout=10) as c:rows=c.execute('SELECT code,COUNT(*) n,MIN(bucket),MAX(bucket) FROM bars_5m GROUP BY code ORDER BY n DESC').fetchall()
- return [{'code':r[0],'name':instrument_meta(r[0]).get('name') or r[0],'bars':r[1],'first':r[2],'last':r[3]} for r in rows if r[0] not in PROTECTED_CODES]
+ return [{'code':r[0],'name':instrument_meta(r[0]).get('name') or r[0],'bars':r[1],'first':r[2],'last':r[3]} for r in rows if r[0] not in PROTECTED_CODES and r[0] not in RESEARCH_ONLY_CODES]
 def _signal(history,session):
  if len(history)<MIN_BARS or len(session)<MIN_SESSION_BARS:return None
  cr=history[-120:];cl=[float(r['close']) for r in cr];e9=_ema(cl[-60:],9);e20=_ema(cl[-80:],20);rsi=_rsi(cl);adx,pdi,mdi=_wilder_adx(cr);last=cr[-1];price=float(last['close']);vw=_vwap(session);prior=cr[-7:-1]
@@ -46,9 +47,7 @@ def run_backtest(codes=None,start=None,end=None,max_codes=40):
  for code in chosen:
   rows=_load_rows(code,start,end);data[code]=rows
   for r in rows:days.add(_dt(r['bucket']).date().isoformat())
- # Precompute completed-bar signals. Entry is deliberately deferred to next bar open.
- pending=defaultdict(list);bar_map={};histories=defaultdict(list);sessions=defaultdict(list)
- events=[]
+ pending=defaultdict(list);bar_map={};histories=defaultdict(list);sessions=defaultdict(list);events=[]
  for code,rows in data.items():
   for idx,r in enumerate(rows):events.append((_dt(r['bucket']),code,idx,r))
  events.sort(key=lambda x:(x[0],x[1]))
@@ -61,26 +60,20 @@ def run_backtest(codes=None,start=None,end=None,max_codes=40):
    if nd.date()==dt.date():
     sig=_signal(histories[code],sessions[key])
     if sig and sig['buy']:pending[nd.isoformat()].append((code,idx+1,sig,r['bucket']))
- # Chronological portfolio replay.
- positions={};trades=[];cash=INITIAL_CAPITAL;equity_peak=INITIAL_CAPITAL;mdd=0;daily={};seen_entries=set()
- timestamps=sorted(set(dt.isoformat() for dt,_,_,_ in events))
- rows_by_time=defaultdict(dict)
+ positions={};trades=[];cash=INITIAL_CAPITAL;equity_peak=INITIAL_CAPITAL;mdd=0;daily={};seen_entries=set();timestamps=sorted(set(dt.isoformat() for dt,_,_,_ in events));rows_by_time=defaultdict(dict)
  for dt,code,idx,r in events:rows_by_time[dt.isoformat()][code]=(idx,r)
  for ts in timestamps:
   dt=_dt(ts);day=dt.date().isoformat();hm=dt.hour*60+dt.minute;st=daily.setdefault(day,{'closed':0,'pnl':0.0,'consecutiveLosses':0,'locked':False})
-  # Existing positions are managed before new entries. Conservative intrabar policy: stop -> trail -> cost protect -> EOD.
   for code,pos in list(positions.items()):
    item=rows_by_time[ts].get(code)
    if not item:continue
-   _,r=item;hi=float(r['high']);lo=float(r['low']);cl=float(r['close']);pos['peak']=max(pos['peak'],hi);pos['trough']=min(pos['trough'],lo);reason=None;raw=None
-   stop=pos['entry']*(1-STOP_PCT)
+   _,r=item;hi=float(r['high']);lo=float(r['low']);cl=float(r['close']);pos['peak']=max(pos['peak'],hi);pos['trough']=min(pos['trough'],lo);reason=None;raw=None;stop=pos['entry']*(1-STOP_PCT)
    if lo<=stop:reason='STOP_LOSS';raw=stop
    elif pos['peak']>=pos['entry']*(1+TRAIL_ACTIVATE_PCT) and lo<=pos['peak']*(1-TRAIL_PCT):reason='TRAIL_STOP';raw=pos['peak']*(1-TRAIL_PCT)
    elif pos['peak']>=pos['entry']*(1+BREAKEVEN_ACTIVATE_PCT) and lo<=pos['entry']*(1+BREAKEVEN_BUFFER_PCT):reason='COST_PROTECT';raw=pos['entry']*(1+BREAKEVEN_BUFFER_PCT)
    elif hm>=EOD_EXIT:reason='EOD_EXIT';raw=cl
    if reason:
     tr=_close(pos,raw,reason,ts);trades.append(tr);cash+=pos['reserved']+tr['pnl'];st['closed']+=1;st['pnl']+=tr['pnl'];st['consecutiveLosses']=st['consecutiveLosses']+1 if tr['pnl']<0 else 0;st['locked']=st['consecutiveLosses']>=MAX_CONSECUTIVE_LOSSES or st['pnl']<=-INITIAL_CAPITAL*DAILY_MAX_LOSS_PCT or st['closed']>=MAX_DAILY_TRADES;positions.pop(code,None)
-  # Entries after exits at this timestamp; only one position per code/day, same as conservative research policy.
   if ENTRY_START<=hm<ENTRY_CUTOFF and not st['locked']:
    candidates=sorted(pending.get(ts,[]),key=lambda x:x[2]['score'],reverse=True)
    for code,idx,sig,signal_at in candidates:
@@ -90,11 +83,9 @@ def run_backtest(codes=None,start=None,end=None,max_codes=40):
     if qty<1 or reserved>cash:continue
     cash-=reserved;positions[code]={'code':code,'name':instrument_meta(code).get('name') or code,'date':day,'signalAt':signal_at,'entryAt':r['bucket'],'entry':fill,'qty':qty,'reserved':reserved,'peak':fill,'trough':fill,'score':sig['score']};seen_entries.add((code,day))
   marked=cash+sum(p['reserved'] for p in positions.values());equity_peak=max(equity_peak,marked);mdd=min(mdd,(marked/equity_peak-1)*100 if equity_peak else 0)
- # Close any residual position at its final available close.
  for code,pos in list(positions.items()):
   r=data[code][-1];tr=_close(pos,float(r['close']),'DATA_END',r['bucket']);trades.append(tr);cash+=pos['reserved']+tr['pnl'];positions.pop(code,None)
- wins=[t for t in trades if t['pnl']>0];losses=[t for t in trades if t['pnl']<=0];gp=sum(t['pnl'] for t in wins);gl=abs(sum(t['pnl'] for t in losses));pf=gp/gl if gl else (999 if gp else 0)
- buckets=[]
+ wins=[t for t in trades if t['pnl']>0];losses=[t for t in trades if t['pnl']<=0];gp=sum(t['pnl'] for t in wins);gl=abs(sum(t['pnl'] for t in losses));pf=gp/gl if gl else (999 if gp else 0);buckets=[]
  for lo,hi,label in [(78,85,'78-84'),(85,90,'85-89'),(90,95,'90-94'),(95,101,'95+')]:
   a=[t for t in trades if lo<=t['score']<hi];buckets.append({'bucket':label,'trades':len(a),'winRate':round(sum(t['pnl']>0 for t in a)/len(a)*100,1) if a else 0,'avgPnlPct':round(sum(t['pnlPct'] for t in a)/len(a),3) if a else 0})
- return {'ok':True,'controlStrategy':CONTROL_STRATEGY,'fidelity':'portfolio-high','executionModel':'completed_signal_bar -> next_bar_open','intrabarPolicy':'stop_first_conservative','portfolioRules':{'maxOpenPositions':MAX_OPEN_POSITIONS,'maxDailyTrades':MAX_DAILY_TRADES,'maxConsecutiveLosses':MAX_CONSECUTIVE_LOSSES,'dailyMaxLossPct':DAILY_MAX_LOSS_PCT*100,'entryWindow':'09:30-14:50','eodExit':'15:15'},'survivorshipBias':'current-universe; historical master/activity/breadth not reconstructed','liveRuleAutoMutation':False,'source':'NH/local bars_5m','costsIncluded':True,'roundTripCostEstimatePct':round(ROUND_TRIP_COST_EST*100,3),'codesTested':len(chosen),'tradingDays':len(days),'trades':len(trades),'wins':len(wins),'losses':len(losses),'winRate':round(len(wins)/len(trades)*100,2) if trades else 0,'profitFactor':round(pf,3),'expectancyPct':round(sum(t['pnlPct'] for t in trades)/len(trades),4) if trades else 0,'maxDrawdownPct':round(mdd,3),'avgMfePct':round(sum(t['mfePct'] for t in trades)/len(trades),3) if trades else 0,'avgMaePct':round(sum(t['maePct'] for t in trades)/len(trades),3) if trades else 0,'endingCapital':round(cash,2),'netPnl':round(cash-INITIAL_CAPITAL,2),'scoreBuckets':buckets,'coverage':coverage[:max(1,min(int(max_codes),100))],'sampleWarning':('표본 부족: 최소 200거래 이상 축적 후 판단 권장' if len(trades)<200 else None),'limitations':['현재 종목마스터 기준 생존편향 존재','과거 active-candidate 유동성/activityScore 및 market breadth는 재구성하지 못해 신호 지표 부분만 재현'],'recentTrades':trades[-50:]}
+ return {'ok':True,'controlStrategy':CONTROL_STRATEGY,'fidelity':'portfolio-high','executionModel':'completed_signal_bar -> next_bar_open','intrabarPolicy':'stop_first_conservative','portfolioRules':{'maxOpenPositions':MAX_OPEN_POSITIONS,'maxDailyTrades':MAX_DAILY_TRADES,'maxConsecutiveLosses':MAX_CONSECUTIVE_LOSSES,'dailyMaxLossPct':DAILY_MAX_LOSS_PCT*100,'entryWindow':'09:30-14:50','eodExit':'15:15'},'survivorshipBias':'current-universe; Universe Snapshot accumulation started in v0.17.0 for future reconstruction','liveRuleAutoMutation':False,'source':'NH/local bars_5m','costsIncluded':True,'roundTripCostEstimatePct':round(ROUND_TRIP_COST_EST*100,3),'codesTested':len(chosen),'tradingDays':len(days),'trades':len(trades),'wins':len(wins),'losses':len(losses),'winRate':round(len(wins)/len(trades)*100,2) if trades else 0,'profitFactor':round(pf,3),'expectancyPct':round(sum(t['pnlPct'] for t in trades)/len(trades),4) if trades else 0,'maxDrawdownPct':round(mdd,3),'avgMfePct':round(sum(t['mfePct'] for t in trades)/len(trades),3) if trades else 0,'avgMaePct':round(sum(t['maePct'] for t in trades)/len(trades),3) if trades else 0,'endingCapital':round(cash,2),'netPnl':round(cash-INITIAL_CAPITAL,2),'scoreBuckets':buckets,'coverage':coverage[:max(1,min(int(max_codes),100))],'sampleWarning':('표본 부족: 최소 200거래 이상 축적 후 판단 권장' if len(trades)<200 else None),'limitations':['v0.17.0 이전 과거 날짜에는 당시 Universe Snapshot이 없어 생존편향이 남음','과거 active-candidate 유동성/activityScore를 완전히 재구성하지 못함'],'recentTrades':trades[-50:]}
