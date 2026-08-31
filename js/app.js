@@ -6,17 +6,25 @@ import {PaperAccount} from './paperBroker.js';
 import {LearningEngine} from './learning.js';
 import {renderChart} from './chart.js';
 import {backtestSymbol} from './backtest.js';
+import {NHBridge} from './nhBridge.js';
 
 const broker=new MockBroker();
 const paper=new PaperAccount(CONFIG.initialCash,CONFIG.profitSplit);
 const risk=new RiskEngine(CONFIG.risk,CONFIG.protectedSymbols);
 const learning=new LearningEngine(CONFIG.dayTrading);
+const nh=new NHBridge(CONFIG.nh.backendBaseUrl);nh.loadSavedUrl();
 let auto=false,lastScores=[],selectedCode='005930',tick=0;
 const $=s=>document.querySelector(s),won=n=>'₩'+Math.round(n||0).toLocaleString('ko-KR'),pct=n=>(n*100).toFixed(2)+'%';
 function log(msg){const d=document.createElement('div');d.className='logline';d.innerHTML=`<span>${new Date().toLocaleTimeString('ko-KR',{hour12:false})}</span> ${msg}`;$('#logBox').prepend(d);while($('#logBox').children.length>80)$('#logBox').lastChild.remove();}
 function totalDayEquity(){return paper.totalProtectedEquity(broker.getQuotes())}
 function dailyPnlPct(){return (totalDayEquity()-paper.dayStartEquity)/paper.dayStartEquity}
 function orderQty(price){const eq=paper.equity(broker.getQuotes()),riskWon=eq*CONFIG.risk.riskPerTradePct,stopWon=price*CONFIG.dayTrading.stopLossPct,byRisk=Math.floor(riskWon/Math.max(stopWon,1)),byOrder=Math.floor(CONFIG.risk.maxOrderWon/price),byPosition=Math.floor(eq*CONFIG.risk.maxPositionPct/price),byCash=Math.floor(paper.cash/price);return Math.max(0,Math.min(byRisk,byOrder,byPosition,byCash))}
+
+async function checkNhConnection(){
+ const box=$('#nhStatusText'),badge=$('#nhBadge');box.textContent='NH 백엔드 연결 확인 중...';
+ try{const h=await nh.health();badge.textContent=h.credentialsConfigured?'NH CONNECTED':'NH SERVER ONLY';badge.className='badge '+(h.credentialsConfigured?'ok':'');box.innerHTML=`<b>백엔드 정상</b> · mode ${h.mode} · trading ${h.tradingEnabled?'ENABLED':'LOCKED'} · credentials ${h.credentialsConfigured?'READY':'미설정'} · ${h.baseUrl}`;log(`NH Bridge 연결 · ${h.mode} · 주문 ${h.tradingEnabled?'허용':'잠금'}`)}
+ catch(e){badge.textContent='NH BACKEND OFF';badge.className='badge';box.textContent=`연결 실패: ${e.message}`;log(`NH Bridge 연결 실패 · ${e.message}`)}
+}
 
 function scan(){
  tick++;
@@ -56,8 +64,10 @@ function renderAll(){
 function runBacktest(){const s=lastScores.find(x=>x.code===selectedCode)||lastScores[0],r=backtestSymbol(s.quote,broker.getHistory(s.code),CONFIG.dayTrading);$('#backtestResult').innerHTML=`<strong>${s.name}</strong> · 거래 ${r.trades}회 · 승률 ${pct(r.winRate)} · 누적수익 ${pct(r.returnPct)} · MDD ${pct(r.maxDrawdown)}`;log(`Backtest ${s.name} · 승률 ${pct(r.winRate)} · 수익 ${pct(r.returnPct)}`)}
 
 $('#scanBtn').onclick=scan;$('#backtestBtn').onclick=runBacktest;
+$('#saveBackendBtn').onclick=()=>{nh.setBaseUrl($('#backendUrl').value);$('#nhStatusText').textContent=nh.baseUrl?'백엔드 주소 저장됨. 연결 확인을 눌러주세요.':'백엔드 주소가 비어 있습니다.';log(`NH 백엔드 주소 ${nh.baseUrl?'저장':'삭제'}`)};
+$('#nhCheckBtn').onclick=checkNhConnection;
 $('#autoToggle').onchange=e=>{if(e.target.checked&&risk.haltType==='daily'){e.target.checked=false;log('AUTO 시작 거절 · 2연패 Daily Lock은 당일 해제 불가');return}auto=e.target.checked;$('#autoStateText').textContent=auto?'ON · PAPER':'OFF';log(`AUTO TRADE ${auto?'ON':'OFF'}`)};
 $('#killBtn').onclick=()=>{auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='EMERGENCY STOP';risk.halt('사용자 긴급 정지','manual');renderAll();log('EMERGENCY STOP · 신규 자동주문 차단')};
 $('#resetBtn').onclick=()=>{if(confirm('Paper 계좌와 학습 데이터를 모두 초기화할까요?')){paper.reset();learning.reset();risk.resume(true);auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='OFF';renderAll();log('Paper/학습 데이터 초기화')}};
-$('#maxOrderText').textContent=won(CONFIG.risk.maxOrderWon);$('#riskTradeText').textContent=pct(CONFIG.risk.riskPerTradePct);$('#maxPositionsText').textContent=CONFIG.risk.maxPositions+'종목';$('#exitText').textContent=`-${pct(CONFIG.dayTrading.stopLossPct)} / +${pct(CONFIG.dayTrading.takeProfitPct)}`;
-scan();renderAll();log('Stock Day Trader v0.3 시작 · 2연패 Lock + Shadow Learning + 40/50/10');setInterval(()=>{broker.tick();scan()},CONFIG.scanIntervalMs);addEventListener('resize',()=>renderSelected());if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+$('#maxOrderText').textContent=won(CONFIG.risk.maxOrderWon);$('#riskTradeText').textContent=pct(CONFIG.risk.riskPerTradePct);$('#maxPositionsText').textContent=CONFIG.risk.maxPositions+'종목';$('#exitText').textContent=`-${pct(CONFIG.dayTrading.stopLossPct)} / +${pct(CONFIG.dayTrading.takeProfitPct)}`;$('#backendUrl').value=nh.baseUrl;
+scan();renderAll();log('Stock Day Trader v0.4 시작 · NH Live Data Ready · 실주문 잠금');if(nh.baseUrl)checkNhConnection();setInterval(()=>{broker.tick();scan()},CONFIG.scanIntervalMs);addEventListener('resize',()=>renderSelected());if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
