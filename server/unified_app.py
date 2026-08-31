@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 
@@ -19,7 +19,7 @@ DASHBOARD = BASE_DIR / "unified_dashboard.html"
 CLASSIC_INDEX = ROOT_DIR / "index.html"
 UPDATE_SCRIPT = BASE_DIR / "remote_update.cmd"
 UPDATE_LAUNCHER = BASE_DIR / "remote_update.vbs"
-UI_VERSION = "0.9.3"
+UI_VERSION = "0.9.4"
 _UPDATE = {"running": False, "requestedAt": None, "lastError": None}
 _UPDATE_LOCK = threading.Lock()
 
@@ -30,7 +30,6 @@ def _remote_allowed(request: Request):
 
 
 def _has_open_positions():
-    """Read-only safety check; avoids init_paper_db/PRAGMA WAL during live trading."""
     try:
         conn = sqlite3.connect(DB_PATH, timeout=2)
         try:
@@ -39,8 +38,7 @@ def _has_open_positions():
         finally:
             conn.close()
     except sqlite3.OperationalError as exc:
-        text = str(exc).lower()
-        if "no such table" in text:
+        if "no such table" in str(exc).lower():
             return False, None
         return None, f"Paper DB 확인 실패: {exc}"
     except Exception as exc:
@@ -89,24 +87,27 @@ async def unified_root(request):
 
 
 async def update_status(request: Request):
-    return {"ok": True, "uiVersion": UI_VERSION, **dict(_UPDATE)}
+    # These endpoints are registered with Starlette Route rather than FastAPI's
+    # decorator. Starlette endpoints must return a Response object; returning a
+    # plain dict caused the misleading HTTP 500 seen on Android.
+    return JSONResponse({"ok": True, "uiVersion": UI_VERSION, **dict(_UPDATE)})
 
 
 async def update_run(request: Request):
     if not _remote_allowed(request):
-        raise HTTPException(status_code=403, detail="업데이트는 localhost 또는 Tailscale 접속에서만 허용됩니다.")
+        return JSONResponse({"ok": False, "detail": "업데이트는 localhost 또는 Tailscale 접속에서만 허용됩니다."}, status_code=403)
 
     has_open, db_error = _has_open_positions()
     if db_error:
-        raise HTTPException(status_code=409, detail=db_error + " · 안전을 위해 업데이트를 보류합니다.")
+        return JSONResponse({"ok": False, "detail": db_error + " · 안전을 위해 업데이트를 보류합니다."}, status_code=409)
     if has_open:
-        raise HTTPException(status_code=409, detail="열린 Paper 포지션이 있어 업데이트를 차단했습니다.")
+        return JSONResponse({"ok": False, "detail": "열린 Paper 포지션이 있어 업데이트를 차단했습니다."}, status_code=409)
     if _UPDATE.get("running"):
-        raise HTTPException(status_code=409, detail="업데이트가 이미 진행 중입니다.")
+        return JSONResponse({"ok": False, "detail": "업데이트가 이미 진행 중입니다."}, status_code=409)
     if not UPDATE_SCRIPT.exists():
-        raise HTTPException(status_code=409, detail="remote_update.cmd가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요.")
+        return JSONResponse({"ok": False, "detail": "remote_update.cmd가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요."}, status_code=409)
     if not UPDATE_LAUNCHER.exists():
-        raise HTTPException(status_code=409, detail="remote_update.vbs가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요.")
+        return JSONResponse({"ok": False, "detail": "remote_update.vbs가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요."}, status_code=409)
 
     try:
         with _UPDATE_LOCK:
@@ -116,14 +117,14 @@ async def update_run(request: Request):
         msg = f"{type(exc).__name__}: {exc}"
         with _UPDATE_LOCK:
             _UPDATE.update({"running": False, "lastError": msg})
-        raise HTTPException(status_code=409, detail="업데이트 예약 실패: " + msg)
+        return JSONResponse({"ok": False, "detail": "업데이트 예약 실패: " + msg}, status_code=409)
 
-    return {
+    return JSONResponse({
         "ok": True,
         "accepted": True,
         "uiVersion": UI_VERSION,
         "message": "업데이트 요청 접수 완료. 약 2초 후 서버 재시작을 시작합니다.",
-    }
+    })
 
 
 app.router.routes.insert(0, Route("/api/system/update/run", update_run, methods=["POST"]))
