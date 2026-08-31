@@ -13,6 +13,7 @@ from collector import DB_PATH,KST,active_candidates,bars,collector,latest_quotes
 from paper_engine import BREAKEVEN_BUFFER_PCT,MAX_OPEN_POSITIONS,ROUND_TRIP_COST_EST,evaluate,scan,paper_enter,mark_positions,open_positions,daily_stats,force_close_all,recent_trades,validation_stats
 from us_collector import us_collector,latest_us_quotes,fetch_current,US_DATA_ENABLED
 from backtest_engine import run_backtest,available_codes
+from historical_accumulator import start as historical_start, stop as historical_stop, status as historical_status
 VERSION='0.8.0';APP_MODE=os.getenv('APP_MODE','paper').lower();ENABLE_TRADING=False;AUTO_START_COLLECTOR=os.getenv('AUTO_START_COLLECTOR','true').lower()=='true';AUTO_BACKFILL=os.getenv('AUTO_BACKFILL','true').lower()=='true';AUTO_PAPER=os.getenv('AUTO_PAPER','true').lower()=='true';PAPER_CAPITAL=float(os.getenv('PAPER_CAPITAL','10000000'));PAPER_LOOP_SEC=max(1,float(os.getenv('PAPER_LOOP_SEC','2')));PAPER_ENTRY_START=os.getenv('PAPER_ENTRY_START','09:30');PAPER_ENTRY_CUTOFF=os.getenv('PAPER_ENTRY_CUTOFF','14:50');PAPER_EOD_EXIT=os.getenv('PAPER_EOD_EXIT','15:15');SIGNAL_MAX_AGE_SEC=max(60,int(os.getenv('SIGNAL_MAX_AGE_SEC','420')));BACKFILL_COUNT=max(30,min(int(os.getenv('BACKFILL_COUNT','120')),500));BACKFILL_MAX_CODES=max(20,min(int(os.getenv('BACKFILL_MAX_CODES','140')),200));ALLOWED_ORIGINS=[x.strip() for x in os.getenv('ALLOWED_ORIGINS','https://ztman000-bot.github.io').split(',') if x.strip()]
 _BACKFILL_STATUS={'running':False,'lastRunAt':None,'lastError':None,'results':{}};_PAPER_STATUS={'running':False,'startedAt':None,'lastCycleAt':None,'lastSignalBar':{},'lastError':None,'entries':0,'closed':0,'shadowSignals':0,'eodExits':0,'staleSignals':0};_PAPER_THREAD=None;_PAPER_STOP=threading.Event()
 def _credentials_ready():return bool(os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET'))
@@ -93,7 +94,7 @@ async def lifespan(app):
 app=FastAPI(title='Stock Day Trader NH Bridge',version=VERSION,lifespan=lifespan);app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['*'])
 def _risk():return {'maxOpenPositions':MAX_OPEN_POSITIONS,'roundTripCostEstimatePct':round(ROUND_TRIP_COST_EST*100,3),'costCoverProtectPct':round(BREAKEVEN_BUFFER_PCT*100,3)}
 @app.get('/api/health')
-def health():return {'ok':True,'service':'stock-day-trader-nh-bridge','version':VERSION,'mode':APP_MODE,'tradingEnabled':False,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'signalMaxAgeSec':SIGNAL_MAX_AGE_SEC,'backfill':dict(_BACKFILL_STATUS),'collector':collector.status(),'usCollector':us_collector.status(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats(),'validation':validation_stats(),'risk':_risk()}
+def health():return {'ok':True,'service':'stock-day-trader-nh-bridge','version':VERSION,'mode':APP_MODE,'tradingEnabled':False,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'signalMaxAgeSec':SIGNAL_MAX_AGE_SEC,'backfill':dict(_BACKFILL_STATUS),'historical':historical_status(),'collector':collector.status(),'usCollector':us_collector.status(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats(),'validation':validation_stats(),'risk':_risk()}
 def _mobile_payload():
  ev=scan();codes=[e['code'] for e in ev];quotes=latest_quotes(codes);pos=open_positions();qm={q['code']:q for q in latest_quotes([p['code'] for p in pos])};en=[]
  for p in pos:
@@ -109,6 +110,19 @@ def backtest_coverage():return {'ok':True,'controlStrategy':'v0.8.0 LOCKED','row
 def backtest_run(codes:str|None=Query(default=None),start:str|None=Query(default=None),end:str|None=Query(default=None),max_codes:int=40):
  parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None
  return run_backtest(parsed,start,end,max_codes)
+@app.get('/api/backtest/history/status')
+def backtest_history_status():return {'ok':True,'status':historical_status()}
+@app.post('/api/backtest/history/start')
+def backtest_history_start(days:int=20,max_codes:int=40):
+ if not _credentials_ready():raise HTTPException(503,'NH PLUG 인증정보가 준비되지 않아 과거데이터 수집을 시작할 수 없습니다.')
+ try:
+  result=historical_start(days,max_codes)
+  if not result.get('ok'):raise HTTPException(409,result.get('message') or '이미 수집 중입니다.')
+  return result
+ except HTTPException:raise
+ except Exception as e:raise HTTPException(500,f'Historical accumulator 시작 오류: {type(e).__name__}: {e}')
+@app.post('/api/backtest/history/stop')
+def backtest_history_stop():return historical_stop()
 @app.get('/api/us/status')
 def us_status():return {'ok':True,'collector':us_collector.status(),'quotes':latest_us_quotes(),'paperEnabled':False,'realOrderEnabled':False}
 @app.get('/api/us/test/{ticker}')
