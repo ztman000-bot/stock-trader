@@ -8,7 +8,7 @@ from app import app
 from collector import DB_PATH
 from historical_accumulator import start as history_start_job, stop as history_stop_job, status as history_job_status
 from strategy_lab import run_lab
-BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.0';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
+BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.1';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
 def _remote_allowed(request):
  host=(request.client.host if request.client else '') or '';return host in ('127.0.0.1','::1') or host.startswith('100.')
 def _has_open_positions():
@@ -51,7 +51,7 @@ def history_start(request):
   return JSONResponse(result,200 if result.get('ok') else 409)
  except Exception as exc:return JSONResponse({'ok':False,'error':str(exc)},500)
 def history_stop(request):return JSONResponse(history_stop_job())
-def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.0','control':'v0.8.0 LOCKED','challengers':['ORB + RVOL','VWAP Pullback','Momentum + ADX/DMI','First Pullback'],'liveMutation':False},'backtest':{'enabled':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
+def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.1','control':'v0.8.0 LOCKED','challengers':['ORB + RVOL','VWAP Pullback','Momentum + ADX/DMI','First Pullback'],'liveMutation':False},'backtest':{'enabled':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
 def root(request):return RedirectResponse('/classic')
 def classic(request):return FileResponse(CLASSIC_INDEX,headers={'Cache-Control':'no-store, max-age=0'})
 def dashboard(request):return FileResponse(DASHBOARD,headers={'Cache-Control':'no-store, max-age=0'})
