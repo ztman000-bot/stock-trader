@@ -14,7 +14,7 @@ ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.15.7'
+UI_VERSION='0.15.8'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -65,11 +65,17 @@ def update_request(request):
 def update_status(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'update':dict(_UPDATE)})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 def history_start(request):
-    try:days=int(request.query_params.get('days','20'));codes=int(request.query_params.get('max_codes','40'))
+    try:
+        days=int(request.query_params.get('days','20'));codes=int(request.query_params.get('max_codes','40'))
+        result=history_start_job(days,codes)
+        if not result.get('ok'):return JSONResponse({'ok':False,'error':result.get('message','수집 시작 거부'),'status':result.get('status',history_job_status())},409)
+        return JSONResponse(result)
     except ValueError:return JSONResponse({'ok':False,'error':'days/max_codes는 숫자여야 합니다.'},400)
-    result=history_start_job(days,codes);return JSONResponse(result,200 if result.get('ok') else 409)
-def history_stop(request):return JSONResponse(history_stop_job())
-def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'validation':{'mfeMae':True,'entrySnapshots':True,'scoreBuckets':True,'profitFactor':True,'expectancy':True,'mdd':True,'failureClassification':True,'controlStrategy':'v0.8.0'},'backtest':{'enabled':True,'ui':True,'historicalAccumulator':True,'maxDays':120,'maxCodes':100,'resumableCache':True,'controlStrategy':'v0.8.0 LOCKED','costsIncluded':True,'liveMutation':False,'sampleWarningBelow':200},'usMarket':{'collector':True,'paper':False,'realOrder':False},'updater':{'launcher':'cmd-direct','wscriptRequired':False,'openPositionGuard':True,'dirtyTreeGuard':True,'compatRoute':True}})
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'Historical accumulator 시작 오류: {type(exc).__name__}: {exc}','status':history_job_status()},500)
+def history_stop(request):
+    try:return JSONResponse(history_stop_job())
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'중지 오류: {type(exc).__name__}: {exc}'},500)
+def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'validation':{'mfeMae':True,'entrySnapshots':True,'scoreBuckets':True,'profitFactor':True,'expectancy':True,'mdd':True,'failureClassification':True,'controlStrategy':'v0.8.0'},'backtest':{'enabled':True,'ui':True,'historicalAccumulator':True,'maxDays':120,'maxCodes':100,'resumableCache':True,'diagnostics':True,'controlStrategy':'v0.8.0 LOCKED','costsIncluded':True,'liveMutation':False,'sampleWarningBelow':200},'usMarket':{'collector':True,'paper':False,'realOrder':False},'updater':{'launcher':'cmd-direct','wscriptRequired':False,'openPositionGuard':True,'dirtyTreeGuard':True,'compatRoute':True}})
 def root(request):return RedirectResponse('/classic')
 def classic(request):return FileResponse(CLASSIC_INDEX,headers={'Cache-Control':'no-store, max-age=0'})
 def dashboard(request):return FileResponse(DASHBOARD,headers={'Cache-Control':'no-store, max-age=0'})
