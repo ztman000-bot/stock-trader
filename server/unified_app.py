@@ -10,7 +10,7 @@ from historical_accumulator import start as history_start_job, stop as history_s
 from strategy_lab import run_lab,run_exit_lab
 from market_lab import run_market_lab
 from research_daemon import start as research_start, latest as research_latest, status as research_status
-BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.7';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
+BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.8';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
 def _remote_allowed(request):
  host=(request.client.host if request.client else '') or '';return host in ('127.0.0.1','::1') or host.startswith('100.')
 def _has_open_positions():
@@ -53,14 +53,14 @@ def market_lab(request):
  try:return JSONResponse(run_market_lab(int(request.query_params.get('max_codes','40'))))
  except Exception as exc:return JSONResponse({'ok':False,'error':f'Market Research Lab 오류: {type(exc).__name__}: {exc}'},500)
 def final_research(request):return JSONResponse(research_latest())
-def research_state(request):return JSONResponse({'ok':True,'status':research_status()})
+def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status()})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 def history_start(request):
  try:
   result=history_start_job(int(request.query_params.get('days','20')),int(request.query_params.get('max_codes','40')));return JSONResponse(result,200 if result.get('ok') else 409)
  except Exception as exc:return JSONResponse({'ok':False,'error':str(exc)},500)
 def history_stop(request):return JSONResponse(history_stop_job())
-def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.7','control':'v0.8.0 LOCKED','crossTrendV2':True,'falseSignalFilter':True,'failureAnalysis':True,'marketRegimeLab':True,'surgeDiscoveryLab':True,'automaticResearch':True,'finalResultsOnly':True,'overnightLab':True,'liveMutation':False},'backtest':{'enabled':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
+def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.8','control':'v0.8.0 LOCKED','crossTrendV2':True,'falseSignalFilter':True,'failureAnalysis':True,'marketRegimeLab':True,'surgeDiscoveryLab':True,'automaticResearch':True,'automaticHistoricalAccumulation':True,'automaticBacktest':True,'finalResultsOnly':True,'overnightLab':True,'liveMutation':False},'backtest':{'enabled':True,'automatic':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
 def root(request):return RedirectResponse('/classic')
 def classic(request):return FileResponse(CLASSIC_INDEX,headers={'Cache-Control':'no-store, max-age=0'})
 def dashboard(request):return FileResponse(DASHBOARD,headers={'Cache-Control':'no-store, max-age=0'})
