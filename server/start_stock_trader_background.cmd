@@ -14,5 +14,5 @@ if not errorlevel 1 (
   exit /b 0
 )
 
-echo [%date% %time%] Starting Stock Trader background... >> stock_trader_startup.log
-".venv\Scripts\python.exe" -m uvicorn app:app --host 0.0.0.0 --port 8000 >> stock_trader_server.log 2>&1
+echo [%date% %time%] Starting Stock Trader Unified UI v0.8.0 background... >> stock_trader_startup.log
+".venv\Scripts\python.exe" -m uvicorn unified_app:app --host 0.0.0.0 --port 8000 >> stock_trader_server.log 2>&1
