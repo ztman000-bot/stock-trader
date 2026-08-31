@@ -22,41 +22,32 @@ AUTO_BACKFILL=os.getenv('AUTO_BACKFILL','true').lower()=='true'
 AUTO_PAPER=os.getenv('AUTO_PAPER','true').lower()=='true'
 PAPER_CAPITAL=float(os.getenv('PAPER_CAPITAL','10000000'))
 PAPER_LOOP_SEC=max(1.0,float(os.getenv('PAPER_LOOP_SEC','2.0')))
+PAPER_ENTRY_CUTOFF=os.getenv('PAPER_ENTRY_CUTOFF','15:15')
+PAPER_EOD_EXIT=os.getenv('PAPER_EOD_EXIT','15:25')
 BACKFILL_COUNT=max(30,min(int(os.getenv('BACKFILL_COUNT','120')),500))
 ALLOWED_ORIGINS=[x.strip() for x in os.getenv('ALLOWED_ORIGINS','https://ztman000-bot.github.io').split(',') if x.strip()]
 
 _BACKFILL_STATUS={'running':False,'lastRunAt':None,'lastError':None,'results':{}}
-_PAPER_STATUS={'running':False,'startedAt':None,'lastCycleAt':None,'lastSignalBar':{},'lastError':None,'entries':0,'closed':0,'shadowSignals':0}
+_PAPER_STATUS={'running':False,'startedAt':None,'lastCycleAt':None,'lastSignalBar':{},'lastError':None,'entries':0,'closed':0,'shadowSignals':0,'eodExits':0}
 _PAPER_THREAD=None
 _PAPER_STOP=threading.Event()
 
-
-def _credentials_ready():
-    return bool(os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET'))
-
-
+def _credentials_ready(): return bool(os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET'))
 def _safe_error(e):
-    if isinstance(e, NhplugError):
-        return {'category':getattr(e,'category','nhplug'),'code':getattr(e,'code',''),'message':getattr(e,'message',str(e))}
+    if isinstance(e,NhplugError): return {'category':getattr(e,'category','nhplug'),'code':getattr(e,'code',''),'message':getattr(e,'message',str(e))}
     return {'category':'server','code':'','message':str(e)}
-
-
 def _validate_code(code:str):
-    if len(code)!=6 or not code.isdigit():
-        raise HTTPException(400,'6자리 국내주식 종목코드가 필요합니다.')
+    if len(code)!=6 or not code.isdigit(): raise HTTPException(400,'6자리 국내주식 종목코드가 필요합니다.')
     return code
-
-
-def _bucket_5m(dt):
-    return dt.replace(minute=(dt.minute//5)*5,second=0,microsecond=0)
-
+def _bucket_5m(dt): return dt.replace(minute=(dt.minute//5)*5,second=0,microsecond=0)
+def _hm(text):
+    h,m=[int(x) for x in text.split(':',1)]; return h*60+m
 
 def _period_rows(payload):
     for key in ('Output_1','output_1','Output_0','output_0'):
         value=payload.get(key) if isinstance(payload,dict) else None
         if isinstance(value,list): return value
     return []
-
 
 def _backfill_one(code:str,count:int=BACKFILL_COUNT):
     now=datetime.now(KST); current_bucket=_bucket_5m(now)
@@ -76,15 +67,11 @@ def _backfill_one(code:str,count:int=BACKFILL_COUNT):
                 if min(o,h,l,c)<=0: skipped+=1; continue
             except (TypeError,ValueError): skipped+=1; continue
             conn.execute('''INSERT INTO bars_5m(code,bucket,open,high,low,close,volume,sample_count) VALUES(?,?,?,?,?,?,?,0)
-                ON CONFLICT(code,bucket) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,sample_count=0''',(code,bucket.isoformat(),o,h,l,c,v))
-            written+=1
+              ON CONFLICT(code,bucket) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,sample_count=0''',(code,bucket.isoformat(),o,h,l,c,v)); written+=1
     return {'received':len(rows),'written':written,'skipped':skipped}
 
-
 def run_backfill(codes=None,count:int=BACKFILL_COUNT):
-    target=list(codes or collector.watchlist)[:10]
-    _BACKFILL_STATUS.update({'running':True,'lastRunAt':datetime.now(KST).isoformat(),'lastError':None,'results':{}})
-    errors=[]
+    target=list(codes or collector.watchlist)[:10]; _BACKFILL_STATUS.update({'running':True,'lastRunAt':datetime.now(KST).isoformat(),'lastError':None,'results':{}}); errors=[]
     try:
         for code in target:
             try: _BACKFILL_STATUS['results'][code]={'ok':True,**_backfill_one(code,count)}
@@ -95,50 +82,58 @@ def run_backfill(codes=None,count:int=BACKFILL_COUNT):
     finally: _BACKFILL_STATUS['running']=False
     return dict(_BACKFILL_STATUS)
 
-
-def _market_hours(now):
+def _entry_hours(now):
     if now.weekday()>=5: return False
     hm=now.hour*60+now.minute
-    return 9*60 <= hm < 15*60+20
+    return 9*60 <= hm < _hm(PAPER_ENTRY_CUTOFF)
 
+def _eod_due(now): return now.weekday()<5 and _hm(PAPER_EOD_EXIT) <= now.hour*60+now.minute < 15*60+31
+
+def _force_eod_exit():
+    latest={r['code']:float(r['price']) for r in latest_quotes()}; closed=[]
+    with sqlite3.connect(DB_PATH,timeout=10) as conn:
+        conn.row_factory=sqlite3.Row
+        positions=conn.execute("SELECT * FROM paper_trades WHERE status='OPEN'").fetchall()
+        for p in positions:
+            price=latest.get(p['code'])
+            if not price: continue
+            entry=float(p['entry_price']); qty=int(p['qty']); pnl=(price-entry)*qty; pnl_pct=(price/entry-1)*100; now=datetime.now(KST).isoformat()
+            conn.execute("UPDATE paper_trades SET exit_at=?,exit_price=?,exit_reason='EOD_EXIT',pnl=?,pnl_pct=?,status='CLOSED' WHERE id=?",(now,price,pnl,pnl_pct,p['id']))
+            closed.append({'id':p['id'],'code':p['code'],'reason':'EOD_EXIT','pnl':pnl,'pnlPct':pnl_pct})
+    return closed
 
 def _paper_loop():
     _PAPER_STATUS.update({'running':True,'startedAt':datetime.now(KST).isoformat(),'lastError':None})
     while not _PAPER_STOP.is_set():
         try:
-            _PAPER_STATUS['lastCycleAt']=datetime.now(KST).isoformat()
+            now=datetime.now(KST); _PAPER_STATUS['lastCycleAt']=now.isoformat()
             marked=mark_positions(); _PAPER_STATUS['closed']+=len(marked.get('closed',[]))
-            now=datetime.now(KST)
-            if _market_hours(now):
+            if _eod_due(now):
+                eod=_force_eod_exit(); _PAPER_STATUS['closed']+=len(eod); _PAPER_STATUS['eodExits']+=len(eod)
+            elif _entry_hours(now):
                 for ev in scan():
                     code=ev['code']; ind=ev.get('indicators') or {}; bucket=ind.get('bucket')
                     if not bucket or ev['action'] not in ('BUY_CANDIDATE','SHADOW_ONLY'): continue
                     if _PAPER_STATUS['lastSignalBar'].get(code)==bucket: continue
-                    result=paper_enter(code,PAPER_CAPITAL)
-                    _PAPER_STATUS['lastSignalBar'][code]=bucket
+                    result=paper_enter(code,PAPER_CAPITAL); _PAPER_STATUS['lastSignalBar'][code]=bucket
                     if result.get('ok') and result.get('shadow'): _PAPER_STATUS['shadowSignals']+=1
                     elif result.get('ok'): _PAPER_STATUS['entries']+=1
             _PAPER_STATUS['lastError']=None
-        except Exception as exc:
-            _PAPER_STATUS['lastError']=f'{type(exc).__name__}: {exc}'[:500]
+        except Exception as exc: _PAPER_STATUS['lastError']=f'{type(exc).__name__}: {exc}'[:500]
         _PAPER_STOP.wait(PAPER_LOOP_SEC)
     _PAPER_STATUS['running']=False
-
 
 def start_paper_loop():
     global _PAPER_THREAD
     if _PAPER_THREAD and _PAPER_THREAD.is_alive(): return dict(_PAPER_STATUS)
     _PAPER_STOP.clear(); _PAPER_THREAD=threading.Thread(target=_paper_loop,name='paper-trading-loop',daemon=True); _PAPER_THREAD.start(); return dict(_PAPER_STATUS)
-
-
 def stop_paper_loop():
     _PAPER_STOP.set()
     if _PAPER_THREAD and _PAPER_THREAD.is_alive(): _PAPER_THREAD.join(timeout=5)
     return dict(_PAPER_STATUS)
 
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app:FastAPI):
     if _credentials_ready():
         if AUTO_BACKFILL: run_backfill()
         if AUTO_START_COLLECTOR: collector.start()
@@ -146,47 +141,37 @@ async def lifespan(app: FastAPI):
     yield
     stop_paper_loop(); collector.stop()
 
-
-app=FastAPI(title='Stock Day Trader NH Bridge',version='0.7.2',lifespan=lifespan)
+app=FastAPI(title='Stock Day Trader NH Bridge',version='0.7.3',lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['*'])
 
-
 @app.get('/api/health')
-def health():
-    return {'ok':True,'service':'stock-day-trader-nh-bridge','version':'0.7.2','mode':APP_MODE,'tradingEnabled':ENABLE_TRADING,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'backfill':dict(_BACKFILL_STATUS),'collector':collector.status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats()}
-
+def health(): return {'ok':True,'service':'stock-day-trader-nh-bridge','version':'0.7.3','mode':APP_MODE,'tradingEnabled':ENABLE_TRADING,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'backfill':dict(_BACKFILL_STATUS),'collector':collector.status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats()}
+@app.get('/api/mobile/status')
+def mobile_status():
+    quotes=latest_quotes(); evaluations=scan(); pos=open_positions(); qmap={q['code']:q for q in quotes}
+    enriched=[]
+    for p in pos:
+        q=qmap.get(p['code'],{}); current=float(q.get('price') or p['entry_price']); entry=float(p['entry_price']); qty=int(p['qty'])
+        enriched.append({**p,'current_price':current,'unrealized_pnl':(current-entry)*qty,'unrealized_pct':(current/entry-1)*100})
+    return {'ok':True,'version':'0.7.3','serverTime':datetime.now(KST).isoformat(),'tradingEnabled':False,'collector':collector.status(),'paperLoop':dict(_PAPER_STATUS),'daily':daily_stats(),'positions':enriched,'scanner':evaluations}
 @app.get('/api/nh/test')
 def nh_test():
     if not _credentials_ready(): raise HTTPException(503,'NHPLUG_APP_KEY / NHPLUG_APP_SECRET이 서버에 설정되지 않았습니다.')
-    try:
-        data=call('/krstock/quote/v1/currentPrice',{'iem_cd':'005930','market_cd':'KRX'})
-        return {'ok':True,'code':'005930','message':'NH PLUG 인증 및 실제 시세 조회 성공','data':data}
+    try: return {'ok':True,'code':'005930','message':'NH PLUG 인증 및 실제 시세 조회 성공','data':call('/krstock/quote/v1/currentPrice',{'iem_cd':'005930','market_cd':'KRX'})}
     except Exception as e:
         err=_safe_error(e); raise HTTPException(502,f"NHPLUG {err['category']} 오류 {err['code']}: {err['message']}")
-
 @app.get('/api/nh/quote/{code}')
-def current_quote(code:str):
-    _validate_code(code)
-    if not _credentials_ready(): raise HTTPException(503,'NH PLUG 자격증명이 설정되지 않았습니다.')
-    try: return {'ok':True,'code':code,'data':call('/krstock/quote/v1/currentPrice',{'iem_cd':code,'market_cd':'KRX'})}
-    except Exception as e:
-        err=_safe_error(e); raise HTTPException(502,f"NHPLUG {err['category']} 오류 {err['code']}: {err['message']}")
-
+def current_quote(code:str): _validate_code(code); return {'ok':True,'code':code,'data':call('/krstock/quote/v1/currentPrice',{'iem_cd':code,'market_cd':'KRX'})}
 @app.post('/api/collector/start')
 def collector_start(codes:str|None=Query(default=None)):
-    if not _credentials_ready(): raise HTTPException(503,'NH PLUG 자격증명이 설정되지 않았습니다.')
-    parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None
-    return {'ok':True,'message':'NH 실제 시세 수집 시작','collector':collector.start(parsed)}
-
+    parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None; return {'ok':True,'collector':collector.start(parsed)}
 @app.post('/api/collector/stop')
-def collector_stop(): return {'ok':True,'message':'시세 수집 중지','collector':collector.stop()}
+def collector_stop(): return {'ok':True,'collector':collector.stop()}
 @app.get('/api/collector/status')
 def collector_status(): return {'ok':True,'collector':collector.status()}
 @app.post('/api/market/backfill')
 def market_backfill(codes:str|None=Query(default=None),count:int=BACKFILL_COUNT):
-    if not _credentials_ready(): raise HTTPException(503,'NH PLUG 자격증명이 설정되지 않았습니다.')
-    parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None
-    return {'ok':True,'backfill':run_backfill(parsed,max(30,min(int(count),500)))}
+    parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None; return {'ok':True,'backfill':run_backfill(parsed,max(30,min(int(count),500)))}
 @app.get('/api/market/backfill/status')
 def market_backfill_status(): return {'ok':True,'backfill':dict(_BACKFILL_STATUS)}
 @app.get('/api/market/latest')
@@ -207,7 +192,5 @@ def paper_positions(): return {'ok':True,'open':open_positions(),'daily':daily_s
 def paper_loop_start(): return {'ok':True,'loop':start_paper_loop()}
 @app.post('/api/paper/loop/stop')
 def paper_loop_stop(): return {'ok':True,'loop':stop_paper_loop()}
-
 @app.post('/api/nh/order')
-def order_locked():
-    raise HTTPException(423,'v0.7.2에서도 NH 실주문은 하드락되어 있습니다. 실제 시세 기반 자동 Paper Trading 검증 전용입니다.')
+def order_locked(): raise HTTPException(423,'v0.7.3에서도 NH 실주문은 하드락되어 있습니다. Paper Trading 검증 전용입니다.')
