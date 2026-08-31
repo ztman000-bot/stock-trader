@@ -12,6 +12,7 @@ load_dotenv()
 from collector import DB_PATH,KST,active_candidates,bars,collector,latest_quotes,nh_call,universe_status
 from paper_engine import BREAKEVEN_BUFFER_PCT,MAX_OPEN_POSITIONS,ROUND_TRIP_COST_EST,evaluate,scan,paper_enter,mark_positions,open_positions,daily_stats,force_close_all,recent_trades,validation_stats
 from us_collector import us_collector,latest_us_quotes,fetch_current,US_DATA_ENABLED
+from backtest_engine import run_backtest,available_codes
 VERSION='0.8.0';APP_MODE=os.getenv('APP_MODE','paper').lower();ENABLE_TRADING=False;AUTO_START_COLLECTOR=os.getenv('AUTO_START_COLLECTOR','true').lower()=='true';AUTO_BACKFILL=os.getenv('AUTO_BACKFILL','true').lower()=='true';AUTO_PAPER=os.getenv('AUTO_PAPER','true').lower()=='true';PAPER_CAPITAL=float(os.getenv('PAPER_CAPITAL','10000000'));PAPER_LOOP_SEC=max(1,float(os.getenv('PAPER_LOOP_SEC','2')));PAPER_ENTRY_START=os.getenv('PAPER_ENTRY_START','09:30');PAPER_ENTRY_CUTOFF=os.getenv('PAPER_ENTRY_CUTOFF','14:50');PAPER_EOD_EXIT=os.getenv('PAPER_EOD_EXIT','15:15');SIGNAL_MAX_AGE_SEC=max(60,int(os.getenv('SIGNAL_MAX_AGE_SEC','420')));BACKFILL_COUNT=max(30,min(int(os.getenv('BACKFILL_COUNT','120')),500));BACKFILL_MAX_CODES=max(20,min(int(os.getenv('BACKFILL_MAX_CODES','140')),200));ALLOWED_ORIGINS=[x.strip() for x in os.getenv('ALLOWED_ORIGINS','https://ztman000-bot.github.io').split(',') if x.strip()]
 _BACKFILL_STATUS={'running':False,'lastRunAt':None,'lastError':None,'results':{}};_PAPER_STATUS={'running':False,'startedAt':None,'lastCycleAt':None,'lastSignalBar':{},'lastError':None,'entries':0,'closed':0,'shadowSignals':0,'eodExits':0,'staleSignals':0};_PAPER_THREAD=None;_PAPER_STOP=threading.Event()
 def _credentials_ready():return bool(os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET'))
@@ -102,6 +103,12 @@ def _mobile_payload():
 def mobile_status():return _mobile_payload()
 @app.get('/api/validation/stats')
 def validation_report():return {'ok':True,**validation_stats()}
+@app.get('/api/backtest/coverage')
+def backtest_coverage():return {'ok':True,'controlStrategy':'v0.8.0 LOCKED','rows':available_codes()}
+@app.get('/api/backtest/run')
+def backtest_run(codes:str|None=Query(default=None),start:str|None=Query(default=None),end:str|None=Query(default=None),max_codes:int=40):
+ parsed=[_validate_code(x.strip()) for x in codes.split(',') if x.strip()] if codes else None
+ return run_backtest(parsed,start,end,max_codes)
 @app.get('/api/us/status')
 def us_status():return {'ok':True,'collector':us_collector.status(),'quotes':latest_us_quotes(),'paperEnabled':False,'realOrderEnabled':False}
 @app.get('/api/us/test/{ticker}')
