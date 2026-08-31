@@ -1,4 +1,4 @@
-"""Strategy Lab v0.16.3. Research only; Control v0.8.0 remains locked."""
+"""Strategy Lab v0.16.5. Research only; Control v0.8.0 remains locked."""
 from backtest_engine import _load_rows,_dt,available_codes,_ema,_rsi,_wilder_adx,_vwap,run_backtest
 
 def _metrics(pnls):
@@ -6,19 +6,59 @@ def _metrics(pnls):
  for x in pnls:eq+=x;peak=max(peak,eq);mdd=min(mdd,eq-peak)
  return {'trades':n,'winRate':round(len(wins)/n*100,2) if n else 0,'profitFactor':round(pf,3),'expectancyPct':round(sum(pnls)/n,4) if n else 0,'maxDrawdownPct':round(mdd,3)}
 
-def _signals(code,kind):
+def _ma(vals,n):return sum(vals[-n:])/n if len(vals)>=n else None
+
+def _cross_v2(cr,session,r,diag):
+ cl=[float(x['close']) for x in cr];price=cl[-1];e5=_ema(cl[-50:],5);ma15=_ma(cl,15);e10=_ema(cl[-80:],10);ma120=_ma(cl,120);rs=_rsi(cl);adx,pdi,mdi=_wilder_adx(cr);vw=_vwap(session)
+ if not all(x is not None for x in (e5,ma15,e10,ma120,rs,adx,pdi,mdi,vw)):return False
+ # Reconstruct the last 4 fast/slow states to detect a fresh cross and whipsaw.
+ states=[]
+ for k in range(4,0,-1):
+  sub=cl[:-k] if k else cl
+  if len(sub)>=15:states.append((_ema(sub[-50:],5),_ma(sub,15)))
+ states.append((e5,ma15));cross_age=None;cross_count=0
+ for z in range(1,len(states)):
+  a,b=states[z-1],states[z]
+  if a[0]<=a[1] and b[0]>b[1]:cross_age=len(states)-1-z;cross_count+=1
+  if a[0]>=a[1] and b[0]<b[1]:cross_count+=1
+ if cross_age is None or cross_age>2:diag['no_fresh_cross']+=1;return False
+ if cross_count>1:diag['whipsaw']+=1;return False
+ # Pre-cross compression: reject already widely separated averages before the event.
+ pre=states[max(0,len(states)-2-cross_age)]
+ if abs(pre[0]-pre[1])/price>.0035:diag['no_compression']+=1;return False
+ # Slope/angle: EMA5 and EMA10 must actually be rising, not merely touching MA15.
+ e5_prev=states[-2][0]
+ e10_prev=_ema(cl[-81:-1],10) if len(cl)>=81 else None
+ if e5<=e5_prev or (e10_prev is not None and e10<=e10_prev):diag['weak_slope']+=1;return False
+ # Long regime + price confirmation.
+ if not (e10>ma120 and price>vw):diag['regime_or_vwap']+=1;return False
+ # ADX must be strong enough and DMI spread positive/meaningful.
+ if adx<22 or pdi<=mdi or (pdi-mdi)<4:diag['weak_trend']+=1;return False
+ # Require relative volume and avoid dead crosses.
+ prior=cr[-7:-1];av=sum(int(x['volume']) for x in prior)/len(prior) if prior else 0;vr=int(r['volume'])/av if av else 0
+ if vr<1.20:diag['low_volume']+=1;return False
+ # Avoid chasing an already stretched move.
+ stretch=max((price/e5)-1,(price/vw)-1)
+ if stretch>.018:diag['overextended']+=1;return False
+ if not 52<=rs<=74:diag['rsi_filter']+=1;return False
+ # Confirmation: after the cross, fast MA must remain above slow MA.
+ if not e5>ma15:diag['failed_persistence']+=1;return False
+ diag['accepted']+=1;return True
+
+def _signals(code,kind,diag=None):
  rows=_load_rows(code);out=[];hist=[];session=[];day=None;prev_fast=None;prev_slow=None
+ if diag is None:diag={k:0 for k in ['accepted','no_fresh_cross','whipsaw','no_compression','weak_slope','regime_or_vwap','weak_trend','low_volume','overextended','rsi_filter','failed_persistence']}
  for i,r in enumerate(rows[:-1]):
   dt=_dt(r['bucket']);d=dt.date();hm=dt.hour*60+dt.minute
   if d!=day:day=d;session=[]
   hist.append(r);session.append(r)
   if len(hist)<130:continue
-  cr=hist[-160:];cl=[float(x['close']) for x in cr];price=float(r['close']);e5=_ema(cl[-50:],5);ma15=sum(cl[-15:])/15;e10=_ema(cl[-80:],10);ma120=sum(cl[-120:])/120;rs=_rsi(cl);adx,pdi,mdi=_wilder_adx(cr);vw=_vwap(session) if session else None;prior=cr[-7:-1]
+  cr=hist[-160:];cl=[float(x['close']) for x in cr];price=float(r['close']);e5=_ema(cl[-50:],5);ma15=_ma(cl,15);e10=_ema(cl[-80:],10);ma120=_ma(cl,120);rs=_rsi(cl);adx,pdi,mdi=_wilder_adx(cr);vw=_vwap(session) if session else None;prior=cr[-7:-1]
   cross=prev_fast is not None and prev_slow is not None and prev_fast<=prev_slow and e5>ma15;prev_fast=e5;prev_slow=ma15
   if len(session)<6 or not 570<=hm<890 or len(prior)<6 or not all(x is not None for x in (rs,adx,pdi,mdi,vw)):continue
-  av=sum(int(x['volume']) for x in prior)/6;vr=int(r['volume'])/av if av else 0;rh=max(float(x['high']) for x in prior);oh=max(float(x['high']) for x in session[:6]);bull=e5>ma15 and e10>ma120 and price>vw and pdi>mdi
-  buy=False
-  if kind=='cross_trend':buy=cross and bull and adx>=20 and 50<=rs<=76 and vr>=1.05
+  av=sum(int(x['volume']) for x in prior)/6;vr=int(r['volume'])/av if av else 0;rh=max(float(x['high']) for x in prior);oh=max(float(x['high']) for x in session[:6]);bull=e5>ma15 and e10>ma120 and price>vw and pdi>mdi;buy=False
+  if kind=='cross_trend_v2':buy=_cross_v2(cr,session,r,diag)
+  elif kind=='cross_trend':buy=cross and bull and adx>=20 and 50<=rs<=76 and vr>=1.05
   elif kind=='orb_cross':buy=bull and price>oh and vr>=1.5 and adx>=22 and 53<=rs<=78 and (cross or abs(e5-ma15)/price<.0025)
   elif kind=='orb_rvol':buy=e10>ma120 and price>vw and pdi>mdi and price>oh and vr>=1.8 and 55<=rs<=78 and adx>=22
   elif kind=='vwap_pullback':buy=e5>ma15 and e10>ma120 and pdi>mdi and adx>=20 and 50<=rs<=72 and float(r['low'])<=vw*1.003 and price>vw and vr>=1
@@ -27,16 +67,15 @@ def _signals(code,kind):
   if buy and i+1<len(rows):out.append(i+1)
  return rows,out
 
-def _exit_trade(rows,i,mode='control',hold_days=0):
- entry=float(rows[i]['open'])*1.0005;peak=entry;entry_day=_dt(rows[i]['bucket']).date();days=[];exitp=None;max_hold=max(0,int(hold_days));
+def _exit_trade(rows,i,hold_days=0):
+ entry=float(rows[i]['open'])*1.0005;peak=entry;days=[];exitp=None;max_hold=max(0,int(hold_days))
  for j in range(i,min(len(rows),i+420)):
   r=rows[j];dt=_dt(r['bucket']);d=dt.date();hm=dt.hour*60+dt.minute
   if d not in days:days.append(d)
   day_index=max(0,len(days)-1);hi=float(r['high']);lo=float(r['low']);cl=float(r['close']);peak=max(peak,hi)
-  hist=rows[max(0,j-130):j+1];cls=[float(x['close']) for x in hist];e5=_ema(cls[-50:],5) if len(cls)>=15 else None;ma15=sum(cls[-15:])/15 if len(cls)>=15 else None;e10=_ema(cls[-80:],10) if len(cls)>=120 else None;ma120=sum(cls[-120:])/120 if len(cls)>=120 else None
-  # Overnight gap risk is represented by the next session open before intraday stops.
+  hist=rows[max(0,j-130):j+1];cls=[float(x['close']) for x in hist];e5=_ema(cls[-50:],5) if len(cls)>=15 else None;ma15=_ma(cls,15);e10=_ema(cls[-80:],10) if len(cls)>=120 else None;ma120=_ma(cls,120)
   if j>i and d!=_dt(rows[j-1]['bucket']).date():
-   op=float(r['open']);
+   op=float(r['open'])
    if op<=entry*.99:exitp=op;break
   if lo<=entry*.99:exitp=entry*.99;break
   if peak>=entry*1.015 and lo<=peak*.992:exitp=peak*.992;break
@@ -48,26 +87,28 @@ def _exit_trade(rows,i,mode='control',hold_days=0):
  if exitp is None:exitp=float(rows[min(len(rows)-1,i+419)]['close'])
  return ((exitp*.9995/entry)-1-.0002-.0015)*100
 
-def _replay(kind,hold_days=0):
- pnl=[]
+def _replay(kind,hold_days=0,with_diag=False):
+ pnl=[];diag={k:0 for k in ['accepted','no_fresh_cross','whipsaw','no_compression','weak_slope','regime_or_vwap','weak_trend','low_volume','overextended','rsi_filter','failed_persistence']}
  for c in [x['code'] for x in available_codes()[:40]]:
-  rows,sigs=_signals(c,kind);used=set()
+  rows,sigs=_signals(c,kind,diag);used=set()
   for i in sigs:
    d=_dt(rows[i]['bucket']).date()
    if d in used:continue
-   used.add(d);pnl.append(_exit_trade(rows,i,'control',hold_days))
- return _metrics(pnl)
+   used.add(d);pnl.append(_exit_trade(rows,i,hold_days))
+ result=_metrics(pnl)
+ if with_diag:result['falseSignalFilter']=diag
+ return result
 
 def run_lab(max_codes=40):
  cov=available_codes()[:max(1,min(int(max_codes),100))];control=run_backtest(max_codes=len(cov));strategies=[{'id':'control','name':'Control v0.8.0','role':'CONTROL','trades':control['trades'],'winRate':control['winRate'],'profitFactor':control['profitFactor'],'expectancyPct':control['expectancyPct'],'maxDrawdownPct':control['maxDrawdownPct']}]
- for kind,name in [('orb_rvol','ORB + RVOL'),('vwap_pullback','VWAP Pullback'),('momentum_adx','Momentum + ADX/DMI'),('first_pullback','First Pullback'),('cross_trend','Cross Trend'),('orb_cross','ORB + Cross Trend')]:strategies.append({'id':kind,'name':name,'role':'CHALLENGER',**_replay(kind,0)})
+ for kind,name in [('orb_rvol','ORB + RVOL'),('vwap_pullback','VWAP Pullback'),('momentum_adx','Momentum + ADX/DMI'),('first_pullback','First Pullback'),('cross_trend','Cross Trend 1.0'),('cross_trend_v2','Cross Trend 2.0 + False Filter'),('orb_cross','ORB + Cross Trend')]:strategies.append({'id':kind,'name':name,'role':'CHALLENGER',**_replay(kind,0,kind=='cross_trend_v2')})
  ranked=sorted(strategies[1:],key=lambda x:(x['profitFactor'],x['expectancyPct']),reverse=True)
- return {'ok':True,'labVersion':'0.16.3','controlStrategy':'v0.8.0 LOCKED','liveRuleAutoMutation':False,'researchOnly':True,'codesTested':len(cov),'strategies':strategies,'bestChallenger':ranked[0]['id'] if ranked else None,'warning':'Cross Trend 포함 1차 스크리닝. 최종 후보는 portfolio-high 재검증 필요.'}
+ return {'ok':True,'labVersion':'0.16.5','controlStrategy':'v0.8.0 LOCKED','liveRuleAutoMutation':False,'researchOnly':True,'codesTested':len(cov),'strategies':strategies,'bestChallenger':ranked[0]['id'] if ranked else None,'warning':'Cross Trend 2.0은 압축/기울기/지속성/ADX-DMI/RVOL/VWAP/과열/Whipsaw 필터를 적용. 거래 감소와 PF·기대값 개선을 함께 평가하세요.'}
 
-def run_exit_lab(strategy='orb_rvol'):
- allowed={'orb_rvol','vwap_pullback','momentum_adx','first_pullback','cross_trend','orb_cross'}
- if strategy not in allowed:strategy='orb_rvol'
+def run_exit_lab(strategy='cross_trend_v2'):
+ allowed={'orb_rvol','vwap_pullback','momentum_adx','first_pullback','cross_trend','cross_trend_v2','orb_cross'}
+ if strategy not in allowed:strategy='cross_trend_v2'
  results=[]
  for days,name in [(0,'당일청산'),(1,'최대 1박'),(2,'최대 2박'),(3,'최대 3박'),(5,'최대 5거래일')]:results.append({'id':f'hold_{days}','name':name,'holdDays':days,**_replay(strategy,days)})
  ranked=sorted(results,key=lambda x:(x['profitFactor'],x['expectancyPct']),reverse=True);best=ranked[0] if ranked else None
- return {'ok':True,'labVersion':'0.16.3','strategy':strategy,'controlStrategy':'v0.8.0 LOCKED','researchOnly':True,'liveRuleAutoMutation':False,'roundTripCostPct':0.27,'results':results,'bestExit':best['id'] if best else None,'passGate':bool(best and best['profitFactor']>1 and best['expectancyPct']>0),'gate':'PF > 1.0 AND expectancy > 0','overnightRisk':'다음 거래일 시가 갭을 우선 반영. 추세 훼손(EMA5<MA15 또는 EMA10<MA120) 시 청산.','warning':'Overnight Lab은 연구용입니다. 통과 후보도 portfolio-high 정밀 재검증 전 실전 적용 금지.'}
+ return {'ok':True,'labVersion':'0.16.5','strategy':strategy,'controlStrategy':'v0.8.0 LOCKED','researchOnly':True,'liveRuleAutoMutation':False,'roundTripCostPct':0.27,'results':results,'bestExit':best['id'] if best else None,'passGate':bool(best and best['profitFactor']>1 and best['expectancyPct']>0),'gate':'PF > 1.0 AND expectancy > 0','overnightRisk':'다음 거래일 시가 갭 우선 반영. EMA5<MA15 또는 EMA10<MA120이면 추세 훼손 청산.','warning':'연구용입니다. 통과 후보도 portfolio-high 정밀 재검증 전 실전 적용 금지.'}
