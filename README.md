@@ -1,36 +1,23 @@
-# Stock Trader v0.2
+# Stock Day Trader v0.3
 
-NH Open API 승인 전에도 동작하는 **Paper Trading용 주식 자동매매 프로토타입**입니다.
+NH Open API 승인 전 Paper Trading으로 검증하는 **데이트레이딩 전용 자동매매 프로토타입**입니다.
 
-## 포함 기능
-- MockBroker 기반 실시간형 가격 변동
-- 좋은 매매위치 TOP10 스캐너
-- EMA5/20/60, RSI(14), ADX/DMI 기반 전략 점수
-- 캔들 차트 + EMA5/20 표시
-- 종목별 간이 백테스트(거래수/승률/누적수익/MDD)
-- Paper 매수/매도 및 localStorage 저장
-- 자동매매 ON/OFF
-- 익절/손절/점수하락 자동 청산
-- 1회 주문/종목비중/보유종목수/일손실/연속손실 Risk Engine
-- 긴급 Kill Switch
-- NH Open API 연결용 `js/nhAdapter.js` 분리
-- PWA 기본 구조
+## v0.3 핵심
+- 5분봉 중심 단순 의사결정: VWAP 상단 + EMA9>EMA20 + 거래량 증가 + 직전고점 돌파
+- RSI/ADX-DMI는 보조 확인 필터로 사용
+- 손절 -1.0%, 목표익절 +1.5%, 트레일링 스탑
+- 1회 위험예산: Day Trading Capital의 0.35%
+- 2회 연속 손실 시 **DAILY LOCK**: 신규 주문 중지
+- DAILY LOCK 이후 Scanner와 **Shadow Trading**은 계속 실행하여 가상 성과 축적
+- 손실 거래 원인을 거래량 부족, VWAP 이탈, 돌파 실패, 과매수 추격, 추세강도 부족 등으로 분류
+- Learning Engine은 실전 전략을 직접 변경하지 않고 개선 후보만 제안
+- 셀트리온(068270)은 `PROTECTED HOLDING`으로 지정하여 자동매매 주문 차단
+- 수익의 신규 순이익 최고치 증가분을 40% 재투자 / 50% Profit Vault / 10% Risk Reserve로 분리
+- Vault와 Reserve는 자동매매 주문가능금액에서 제외
+- 종목별 간이 백테스트, 차트, EMA9/20, VWAP, RSI, ADX/DMI 제공
+- NH Open API 연결용 Adapter는 별도 유지
 
-## 현재 데이터 주의
-v0.2의 시세/캔들/백테스트는 모두 MockBroker 시뮬레이션 데이터입니다. 실제 투자 판단용 실시간 데이터가 아닙니다. NH API 승인 후 Market Data Adapter를 교체합니다.
+## 주의
+현재 시세와 캔들은 MockBroker 시뮬레이션 데이터이며 실제 투자 판단용 데이터가 아닙니다. Shadow Learning 결과와 백테스트 역시 Mock 데이터 기반입니다. 실제 NH 시세 연결 후 충분한 Paper Trading 표본으로 다시 검증해야 합니다.
 
-## NH Open API 연동 시 교체 지점
-현재 `app.js`는 `MockBroker`를 사용합니다. NH 문서가 확보되면 `nhAdapter.js`에 인증, 현재가/차트, 계좌잔고, 주문/정정/취소, 호출 제한과 재시도를 구현합니다.
-
-실제 주문은 Strategy가 직접 호출하지 않고 **Strategy → RiskEngine → Execution Adapter** 순서를 유지합니다.
-
-## 기본 리스크 값
-- 초기 Paper 현금: 10,000,000원
-- 1회 최대 주문: 100,000원
-- 종목 최대 비중: 10%
-- 최대 보유: 5종목
-- 일일 최대 손실: -1%
-- 연속 손실 3회: 신규 진입 차단
-- 익절 +3.5%, 손절 -2.0%
-
-`js/config.js`에서 수정할 수 있습니다.
+실제 주문 경로는 **Market Data → Scanner → Entry Gate → Risk Engine → Execution Adapter** 순서를 유지하며 Strategy/Learning Engine이 NH 주문 API를 직접 호출하지 않도록 설계합니다.
