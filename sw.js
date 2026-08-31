@@ -1,5 +1,5 @@
-const CACHE='stock-day-trader-live-v130';
-const ASSETS=['/classic','/styles.css','/js/app-safe.js','/js/live-app.js','/js/ui-polish.js','/manifest.webmanifest','/icons/icon-192.svg','/icons/icon-512.svg'];
+const CACHE='stock-day-trader-live-v151';
+const ASSETS=['/classic','/styles.css?v=151','/js/app-safe.js?v=151','/js/live-app.js?v=151','/js/ui-polish.js?v=151','/manifest.webmanifest?v=151','/icons/icon-192.svg','/icons/icon-512.svg'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS).catch(()=>{})))});
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=new URL(e.request.url);if(u.pathname.startsWith('/api/')){e.respondWith(fetch(e.request,{cache:'no-store'}));return}e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{if(r.ok){const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/classic'))))});
