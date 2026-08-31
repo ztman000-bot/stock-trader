@@ -19,7 +19,7 @@ DASHBOARD = BASE_DIR / "unified_dashboard.html"
 CLASSIC_INDEX = ROOT_DIR / "index.html"
 UPDATE_SCRIPT = BASE_DIR / "remote_update.cmd"
 UPDATE_LAUNCHER = BASE_DIR / "remote_update.vbs"
-UI_VERSION = "0.9.6"
+UI_VERSION = "0.10.0"
 _UPDATE = {"running": False, "requestedAt": None, "lastError": None}
 _UPDATE_LOCK = threading.Lock()
 
