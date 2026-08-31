@@ -3,92 +3,61 @@ import {MockBroker} from './mockBroker.js';
 import {scoreSymbol,evaluateExit} from './strategy.js';
 import {RiskEngine} from './risk.js';
 import {PaperAccount} from './paperBroker.js';
+import {LearningEngine} from './learning.js';
 import {renderChart} from './chart.js';
 import {backtestSymbol} from './backtest.js';
 
 const broker=new MockBroker();
-const paper=new PaperAccount(CONFIG.initialCash);
-const risk=new RiskEngine(CONFIG.risk);
-let auto=false,lastScores=[],selectedCode='005930';
-const $=s=>document.querySelector(s);
-const won=n=>'₩'+Math.round(n).toLocaleString('ko-KR');
-const pct=n=>(n*100).toFixed(2)+'%';
-
-function log(msg){const d=document.createElement('div');d.className='logline';d.innerHTML=`<span>${new Date().toLocaleTimeString('ko-KR',{hour12:false})}</span> ${msg}`;$('#logBox').prepend(d);while($('#logBox').children.length>60)$('#logBox').lastChild.remove();}
+const paper=new PaperAccount(CONFIG.initialCash,CONFIG.profitSplit);
+const risk=new RiskEngine(CONFIG.risk,CONFIG.protectedSymbols);
+const learning=new LearningEngine(CONFIG.dayTrading);
+let auto=false,lastScores=[],selectedCode='005930',tick=0;
+const $=s=>document.querySelector(s),won=n=>'₩'+Math.round(n||0).toLocaleString('ko-KR'),pct=n=>(n*100).toFixed(2)+'%';
+function log(msg){const d=document.createElement('div');d.className='logline';d.innerHTML=`<span>${new Date().toLocaleTimeString('ko-KR',{hour12:false})}</span> ${msg}`;$('#logBox').prepend(d);while($('#logBox').children.length>80)$('#logBox').lastChild.remove();}
+function totalDayEquity(){return paper.totalProtectedEquity(broker.getQuotes())}
+function dailyPnlPct(){return (totalDayEquity()-paper.dayStartEquity)/paper.dayStartEquity}
+function orderQty(price){const eq=paper.equity(broker.getQuotes()),riskWon=eq*CONFIG.risk.riskPerTradePct,stopWon=price*CONFIG.dayTrading.stopLossPct,byRisk=Math.floor(riskWon/Math.max(stopWon,1)),byOrder=Math.floor(CONFIG.risk.maxOrderWon/price),byPosition=Math.floor(eq*CONFIG.risk.maxPositionPct/price),byCash=Math.floor(paper.cash/price);return Math.max(0,Math.min(byRisk,byOrder,byPosition,byCash))}
 
 function scan(){
-  const qs=broker.getQuotes();
-  lastScores=qs.map(q=>({...scoreSymbol(q,broker.getHistory(q.code)),quote:q})).sort((a,b)=>b.total-a.total);
-  renderScanner();renderSelected();
-  if(auto)autoTrade();
-  log(`Scanner 완료 · TOP ${lastScores[0].name} ${lastScores[0].total}점`);
+ tick++;
+ const qs=broker.getQuotes();
+ lastScores=qs.map(q=>({...scoreSymbol(q,broker.getHistory(q.code),CONFIG.dayTrading),quote:q})).sort((a,b)=>b.total-a.total);
+ renderScanner();renderSelected();
+ manageAutoPositions();
+ if(auto&&!risk.halted)autoEntries();
+ if(risk.haltType==='daily')learning.observeShadow(lastScores.filter(s=>!CONFIG.protectedSymbols.includes(s.code)),tick);
+ renderAll();
+ log(`Scanner · TOP ${lastScores[0].name} ${lastScores[0].total}점 · ${lastScores.filter(s=>s.entryReady).length}개 진입조건 충족`);
 }
 
 function renderScanner(){
-  $('#scannerBody').innerHTML=lastScores.slice(0,10).map((s,i)=>`<tr class="pick-row" data-code="${s.code}"><td>${i+1}</td><td><b>${s.name}</b><br><span class="neutral">${s.code}</span></td><td>${won(s.quote.price)}</td><td class="${s.quote.change>=0?'up':'down'}">${pct(s.quote.change)}</td><td><span class="score">${s.total}</span></td><td>RSI ${s.ind.rsi.toFixed(0)} / ADX ${s.ind.adx.toFixed(0)}</td><td>${s.verdict}</td><td><button class="btn small buy-btn" data-code="${s.code}">Paper 매수</button></td></tr>`).join('');
-  document.querySelectorAll('.pick-row').forEach(r=>r.onclick=e=>{if(e.target.closest('button'))return;selectedCode=r.dataset.code;renderSelected();});
-  document.querySelectorAll('.buy-btn').forEach(b=>b.onclick=()=>manualBuy(b.dataset.code));
+ $('#scannerBody').innerHTML=lastScores.slice(0,10).map((s,i)=>{const prot=CONFIG.protectedSymbols.includes(s.code);const core=[s.checks.aboveVwap,s.checks.emaTrend,s.checks.volume,s.checks.breakout].filter(Boolean).length;return `<tr class="pick-row" data-code="${s.code}"><td>${i+1}</td><td><b>${s.name}</b>${prot?' <span class="protected">PROTECTED</span>':''}<br><span class="neutral">${s.code}</span></td><td>${won(s.quote.price)}</td><td class="${s.quote.change>=0?'up':'down'}">${pct(s.quote.change)}</td><td><span class="score">${core}/4</span></td><td class="${s.checks.aboveVwap?'up':'down'}">${s.checks.aboveVwap?'상단':'하단'}</td><td>${s.ind.volumeRatio.toFixed(2)}x</td><td>${prot?'장기보유 보호':s.verdict}</td><td><button class="btn small buy-btn" ${prot?'disabled':''} data-code="${s.code}">Paper 매수</button></td></tr>`}).join('');
+ document.querySelectorAll('.pick-row').forEach(r=>r.onclick=e=>{if(e.target.closest('button'))return;selectedCode=r.dataset.code;renderSelected()});
+ document.querySelectorAll('.buy-btn:not([disabled])').forEach(b=>b.onclick=()=>manualBuy(b.dataset.code));
 }
+function renderSelected(){const s=lastScores.find(x=>x.code===selectedCode)||lastScores[0];if(!s)return;selectedCode=s.code;$('#chartTitle').textContent=`${s.name} (${s.code})`;$('#indicatorCards').innerHTML=`<div><small>핵심조건</small><strong>${[s.checks.aboveVwap,s.checks.emaTrend,s.checks.volume,s.checks.breakout].filter(Boolean).length}/4</strong></div><div><small>VWAP</small><strong>${won(s.ind.vwap)}</strong></div><div><small>EMA9/20</small><strong>${s.ind.ema9>s.ind.ema20?'상승':'약세'}</strong></div><div><small>RSI(14)</small><strong>${s.ind.rsi.toFixed(1)}</strong></div><div><small>ADX / DMI</small><strong>${s.ind.adx.toFixed(0)} · ${s.ind.plusDI>s.ind.minusDI?'+DI':'-DI'}</strong></div><div><small>거래량비</small><strong>${s.ind.volumeRatio.toFixed(2)}x</strong></div>`;renderChart($('#priceChart'),broker.getHistory(s.code),s.ind)}
 
-function renderSelected(){
-  const s=lastScores.find(x=>x.code===selectedCode)||lastScores[0];if(!s)return;selectedCode=s.code;
-  $('#chartTitle').textContent=`${s.name} (${s.code})`;
-  $('#indicatorCards').innerHTML=`<div><small>종합점수</small><strong>${s.total}</strong></div><div><small>RSI(14)</small><strong>${s.ind.rsi.toFixed(1)}</strong></div><div><small>ADX</small><strong>${s.ind.adx.toFixed(1)}</strong></div><div><small>+DI / -DI</small><strong>${s.ind.plusDI.toFixed(1)} / ${s.ind.minusDI.toFixed(1)}</strong></div><div><small>거래량비</small><strong>${s.ind.volumeRatio.toFixed(2)}x</strong></div><div><small>EMA5/20</small><strong>${s.ind.ema5>s.ind.ema20?'상승':'약세'}</strong></div>`;
-  renderChart($('#priceChart'),broker.getHistory(s.code),s.ind);
-}
-
-function getEquity(){return paper.equity(broker.getQuotes());}
-function orderQty(price){return Math.max(1,Math.floor(CONFIG.risk.maxOrderWon/price));}
-function manualBuy(code){
-  const q=broker.getQuote(code),eq=getEquity(),qty=orderQty(q.price);
-  const check=risk.validateBuy({price:q.price,qty,equity:eq,positions:Object.values(paper.positions),dailyPnlPct:(eq-paper.dayStartEquity)/paper.dayStartEquity,lossStreak:paper.lossStreak});
-  if(!check.ok){log(`Risk 거절 · ${q.name}: ${check.reason}`);return;}
-  if(paper.buy(q,qty,'수동 Paper 주문'))log(`BUY ${q.name} ${qty}주 @ ${won(q.price)}`);else log('주문 실패 · 현금 부족');
-  renderAll();
-}
-function manualSell(code){const q=broker.getQuote(code),p=paper.positions[code];if(p&&paper.sell(q,p.qty,'수동 전량매도'))log(`SELL ${q.name} ${p.qty}주 @ ${won(q.price)}`);renderAll();}
-
-function autoTrade(){
-  const qs=broker.getQuotes();
-  for(const p of Object.values({...paper.positions})){
-    const q=qs.find(x=>x.code===p.code),s=lastScores.find(x=>x.code===p.code);if(!q||!s)continue;
-    const ex=evaluateExit(p,q,s,CONFIG.strategy);if(ex.sell){paper.sell(q,p.qty,'AUTO '+ex.reason);log(`AUTO SELL ${q.name} · ${ex.reason}`);}
-  }
-  for(const s of lastScores){
-    if(s.total<CONFIG.strategy.buyScore)break;if(paper.positions[s.code])continue;
-    const q=s.quote,qty=orderQty(q.price),equity=getEquity();
-    const check=risk.validateBuy({price:q.price,qty,equity,positions:Object.values(paper.positions),dailyPnlPct:(equity-paper.dayStartEquity)/paper.dayStartEquity,lossStreak:paper.lossStreak});
-    if(check.ok&&paper.buy(q,qty,`AUTO Score ${s.total}`)){log(`AUTO BUY ${q.name} ${qty}주 · Score ${s.total}`);break;}
-    if(!check.ok)log(`AUTO Risk 차단 · ${q.name}: ${check.reason}`);
-  }
-  renderAll();
-}
+function validate(code,q,qty){return risk.validateBuy({code,price:q.price,qty,equity:paper.equity(broker.getQuotes()),positions:Object.values(paper.positions),dailyPnlPct:dailyPnlPct(),lossStreak:paper.lossStreak})}
+function manualBuy(code){const q=broker.getQuote(code),s=lastScores.find(x=>x.code===code),qty=orderQty(q.price),check=validate(code,q,qty);if(!check.ok){log(`Risk 거절 · ${q.name}: ${check.reason}`);return}if(paper.buy(q,qty,'수동 Paper 주문',{mode:'MANUAL',signal:s?.checks||{}}))log(`BUY ${q.name} ${qty}주 @ ${won(q.price)}`);renderAll()}
+function manualSell(code){const q=broker.getQuote(code),p=paper.positions[code];if(!p)return;const qty=p.qty,trade=paper.sell(q,qty,'수동 전량매도');if(trade){handleClosedTrade(trade,lastScores.find(x=>x.code===code));log(`SELL ${q.name} ${qty}주 · ${won(trade.pnl)}`)}renderAll()}
+function handleClosedTrade(trade,score){if(trade.pnl<0&&score)learning.recordLoss(trade,score);if(trade.split)log(`수익분리 · 재투자 ${won(trade.split.reinvested)} / Vault ${won(trade.split.vault)} / Reserve ${won(trade.split.reserve)}`);if(risk.shouldDailyLock(paper.lossStreak)){risk.halt(`${CONFIG.risk.maxLossStreak}연패 · 당일 신규매매 중지`,'daily');auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='DAILY LOCK';log('DAILY LOCK · 주문 중지, Scanner/Shadow Learning 계속 실행')}}
+function manageAutoPositions(){const qs=broker.getQuotes();for(const p of Object.values({...paper.positions})){if(p.entryMeta?.mode!=='AUTO')continue;const q=qs.find(x=>x.code===p.code),s=lastScores.find(x=>x.code===p.code);if(!q||!s)continue;const ex=evaluateExit(p,q,s,CONFIG.dayTrading);if(ex.sell){const trade=paper.sell(q,p.qty,'AUTO '+ex.reason);if(trade){handleClosedTrade(trade,s);log(`AUTO SELL ${q.name} · ${ex.reason} · ${won(trade.pnl)}`)}}}}
+function autoEntries(){for(const s of lastScores){if(!s.entryReady||CONFIG.protectedSymbols.includes(s.code)||paper.positions[s.code])continue;const q=s.quote,qty=orderQty(q.price),check=validate(s.code,q,qty);if(check.ok&&paper.buy(q,qty,'AUTO 핵심조건 충족',{mode:'AUTO',signal:s.checks,score:s.total})){log(`AUTO BUY ${q.name} ${qty}주 · VWAP/EMA/Volume/Breakout 충족`);break}if(!check.ok)log(`AUTO Risk 차단 · ${q.name}: ${check.reason}`)}}
 
 function renderAll(){
-  const qs=broker.getQuotes(),eq=paper.equity(qs),pnl=eq-paper.dayStartEquity,positions=Object.values(paper.positions);
-  $('#equity').textContent=won(eq);$('#equityPnl').textContent=`오늘 손익 ${won(pnl)} (${pct(pnl/paper.dayStartEquity)})`;
-  $('#cash').textContent=won(paper.cash);$('#positionCount').textContent=positions.length;$('#exposure').textContent=`투자비중 ${pct((eq-paper.cash)/eq)}`;$('#todayOrders').textContent=paper.trades.length;$('#winLoss').textContent=`실현손익 ${won(paper.realized)}`;
-  $('#positionsBody').innerHTML=positions.length?positions.map(p=>{const q=qs.find(x=>x.code===p.code),val=q.price*p.qty,pn=(q.price-p.avg)*p.qty;return `<tr><td><b>${p.name}</b><br><span class="neutral">${p.code}</span></td><td>${p.qty}</td><td>${won(p.avg)}</td><td>${won(q.price)}</td><td class="${pn>=0?'up':'down'}">${won(pn)}</td><td>${pct(val/eq)}</td><td><button class="btn small sell-btn" data-code="${p.code}">전량매도</button></td></tr>`}).join(''):'<tr><td colspan="7" class="neutral">보유 종목이 없습니다.</td></tr>';
-  document.querySelectorAll('.sell-btn').forEach(b=>b.onclick=()=>manualSell(b.dataset.code));
-  $('#tradesBody').innerHTML=paper.trades.slice(0,20).map(t=>`<tr><td>${new Date(t.ts).toLocaleTimeString('ko-KR',{hour12:false})}</td><td>${t.name}</td><td class="${t.side==='BUY'?'up':'down'}">${t.side}</td><td>${t.qty}</td><td>${won(t.price)}</td><td>${t.reason}</td></tr>`).join('')||'<tr><td colspan="6" class="neutral">아직 주문이 없습니다.</td></tr>';
-  const daily=(eq-paper.dayStartEquity)/paper.dayStartEquity,blocked=risk.halted||daily<=-CONFIG.risk.dailyLossPct||paper.lossStreak>=CONFIG.risk.maxLossStreak;
-  $('#riskState').textContent=blocked?(risk.haltReason||'RISK BLOCKED'):'NORMAL';$('#riskState').className='risk-state '+(blocked?'badbox':'okbox');
-  $('#strategyStats').innerHTML=`<div><small>매수 점수</small><strong>${CONFIG.strategy.buyScore}+</strong></div><div><small>매도 점수</small><strong>${CONFIG.strategy.sellScore}-</strong></div><div><small>익절 기준</small><strong>${pct(CONFIG.strategy.takeProfitPct)}</strong></div><div><small>손절 기준</small><strong>-${pct(CONFIG.strategy.stopLossPct)}</strong></div><div><small>연속 손실</small><strong>${paper.lossStreak}/${CONFIG.risk.maxLossStreak}</strong></div><div><small>일일 손익</small><strong>${pct(daily)}</strong></div>`;
+ const qs=broker.getQuotes(),eq=paper.equity(qs),total=paper.totalProtectedEquity(qs),pnl=total-paper.dayStartEquity,positions=Object.values(paper.positions),ls=learning.stats();
+ $('#equity').textContent=won(eq);$('#equityPnl').textContent=`오늘 경제손익 ${won(pnl)} (${pct(pnl/paper.dayStartEquity)})`;$('#cash').textContent=won(paper.cash);$('#vault').textContent=won(paper.vault);$('#reserve').textContent=won(paper.reserve);$('#lossStreak').textContent=`${paper.lossStreak} / ${CONFIG.risk.maxLossStreak}`;$('#shadowCount').textContent=ls.shadowTrades;$('#shadowWin').textContent=`승률 ${pct(ls.shadowWinRate)}`;
+ $('#positionsBody').innerHTML=positions.length?positions.map(p=>{const q=qs.find(x=>x.code===p.code),val=q.price*p.qty,pn=(q.price-p.avg)*p.qty;return `<tr><td><b>${p.name}</b><br><span class="neutral">${p.code} · ${p.entryMeta?.mode||'PAPER'}</span></td><td>${p.qty}</td><td>${won(p.avg)}</td><td>${won(q.price)}</td><td class="${pn>=0?'up':'down'}">${won(pn)}</td><td>${pct(val/Math.max(eq,1))}</td><td><button class="btn small sell-btn" data-code="${p.code}">전량매도</button></td></tr>`}).join(''):'<tr><td colspan="7" class="neutral">Day Trading 포지션이 없습니다.</td></tr>';document.querySelectorAll('.sell-btn').forEach(b=>b.onclick=()=>manualSell(b.dataset.code));
+ $('#tradesBody').innerHTML=paper.trades.slice(0,30).map(t=>`<tr><td>${new Date(t.ts).toLocaleTimeString('ko-KR',{hour12:false})}</td><td>${t.name}</td><td class="${t.side==='BUY'?'up':'down'}">${t.side}</td><td>${t.qty}</td><td>${won(t.price)}</td><td class="${(t.pnl||0)>=0?'up':'down'}">${t.pnl==null?'-':won(t.pnl)}</td><td>${t.reason}</td></tr>`).join('')||'<tr><td colspan="7" class="neutral">아직 주문이 없습니다.</td></tr>';
+ const blocked=risk.halted||dailyPnlPct()<=-CONFIG.risk.dailyLossPct;$('#riskState').textContent=blocked?(risk.haltReason||'RISK BLOCKED'):'NORMAL · ENTRY GATE ACTIVE';$('#riskState').className='risk-state '+(blocked?'badbox':'okbox');$('#lockBadge').textContent=risk.haltType==='daily'?'DAILY LOCK':'TRADE READY';$('#lockBadge').className='badge '+(risk.haltType==='daily'?'badbadge':'ok');
+ $('#strategyStats').innerHTML=`<div><small>진입 핵심</small><strong>4/4 + 확인 1</strong></div><div><small>손절</small><strong>-${pct(CONFIG.dayTrading.stopLossPct)}</strong></div><div><small>목표익절</small><strong>+${pct(CONFIG.dayTrading.takeProfitPct)}</strong></div><div><small>1회 위험</small><strong>${pct(CONFIG.risk.riskPerTradePct)}</strong></div><div><small>재투자 누계</small><strong>${won(paper.reinvested)}</strong></div><div><small>Protected</small><strong>068270</strong></div>`;
+ const tags=ls.topTags.length?ls.topTags.map(([t,n])=>`<span class="tag">${t} ${n}</span>`).join(' '):'<span class="neutral">아직 손실 사례 없음</span>';$('#learningBox').innerHTML=`<div class="learning-stats"><b>손실 사례 ${ls.lossCases}건</b><b>Shadow ${ls.shadowTrades}건 / 승률 ${pct(ls.shadowWinRate)}</b><b>평균 손실 ${pct(ls.avgLoss)}</b></div><div class="tags">${tags}</div><p>${learning.recommendation()}</p><small>※ 학습 엔진은 실전 파라미터를 자동 변경하지 않습니다. 실패 원인과 대안 성과를 축적해 검증 후보만 제시합니다.</small>`;
 }
-
-function runBacktest(){
-  const s=lastScores.find(x=>x.code===selectedCode)||lastScores[0],r=backtestSymbol(s.quote,broker.getHistory(s.code),CONFIG.strategy);
-  $('#backtestResult').innerHTML=`<strong>${s.name}</strong> · 거래 ${r.trades}회 · 승률 ${pct(r.winRate)} · 누적수익 ${pct(r.returnPct)} · MDD ${pct(r.maxDrawdown)}`;
-  log(`Backtest ${s.name} · 승률 ${pct(r.winRate)} · 수익 ${pct(r.returnPct)}`);
-}
+function runBacktest(){const s=lastScores.find(x=>x.code===selectedCode)||lastScores[0],r=backtestSymbol(s.quote,broker.getHistory(s.code),CONFIG.dayTrading);$('#backtestResult').innerHTML=`<strong>${s.name}</strong> · 거래 ${r.trades}회 · 승률 ${pct(r.winRate)} · 누적수익 ${pct(r.returnPct)} · MDD ${pct(r.maxDrawdown)}`;log(`Backtest ${s.name} · 승률 ${pct(r.winRate)} · 수익 ${pct(r.returnPct)}`)}
 
 $('#scanBtn').onclick=scan;$('#backtestBtn').onclick=runBacktest;
-$('#autoToggle').onchange=e=>{auto=e.target.checked;if(auto&&risk.halted)risk.resume();$('#autoStateText').textContent=auto?'ON · PAPER':'OFF';log(`AUTO TRADE ${auto?'ON':'OFF'}`);};
-$('#killBtn').onclick=()=>{auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='EMERGENCY STOP';risk.halt('사용자 긴급 정지');renderAll();log('EMERGENCY STOP · 신규 자동주문 차단');};
-$('#resetBtn').onclick=()=>{if(confirm('Paper 계좌와 주문 내역을 초기화할까요?')){paper.reset();risk.resume();auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='OFF';renderAll();log('Paper 계좌 초기화');}};
-$('#maxOrderText').textContent=won(CONFIG.risk.maxOrderWon);$('#maxPositionText').textContent=pct(CONFIG.risk.maxPositionPct);$('#maxPositionsText').textContent=CONFIG.risk.maxPositions+'종목';$('#dailyLossText').textContent='-'+pct(CONFIG.risk.dailyLossPct);$('#maxLossStreakText').textContent=CONFIG.risk.maxLossStreak+'회';
-
-scan();renderAll();log('Stock Trader v0.2 시작 · EMA/RSI/ADX-DMI + Backtest');
-setInterval(()=>{broker.tick();scan();renderAll();},CONFIG.scanIntervalMs);
-addEventListener('resize',()=>renderSelected());
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+$('#autoToggle').onchange=e=>{if(e.target.checked&&risk.haltType==='daily'){e.target.checked=false;log('AUTO 시작 거절 · 2연패 Daily Lock은 당일 해제 불가');return}auto=e.target.checked;$('#autoStateText').textContent=auto?'ON · PAPER':'OFF';log(`AUTO TRADE ${auto?'ON':'OFF'}`)};
+$('#killBtn').onclick=()=>{auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='EMERGENCY STOP';risk.halt('사용자 긴급 정지','manual');renderAll();log('EMERGENCY STOP · 신규 자동주문 차단')};
+$('#resetBtn').onclick=()=>{if(confirm('Paper 계좌와 학습 데이터를 모두 초기화할까요?')){paper.reset();learning.reset();risk.resume(true);auto=false;$('#autoToggle').checked=false;$('#autoStateText').textContent='OFF';renderAll();log('Paper/학습 데이터 초기화')}};
+$('#maxOrderText').textContent=won(CONFIG.risk.maxOrderWon);$('#riskTradeText').textContent=pct(CONFIG.risk.riskPerTradePct);$('#maxPositionsText').textContent=CONFIG.risk.maxPositions+'종목';$('#exitText').textContent=`-${pct(CONFIG.dayTrading.stopLossPct)} / +${pct(CONFIG.dayTrading.takeProfitPct)}`;
+scan();renderAll();log('Stock Day Trader v0.3 시작 · 2연패 Lock + Shadow Learning + 40/50/10');setInterval(()=>{broker.tick();scan()},CONFIG.scanIntervalMs);addEventListener('resize',()=>renderSelected());if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
