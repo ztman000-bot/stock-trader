@@ -4,22 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#111827" />
-  <title>Stock Trader v0.1</title>
+  <title>Stock Trader v0.2</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div>
-      <div class="brand">Stock Trader <span>v0.1</span></div>
+      <div class="brand">Stock Trader <span>v0.2</span></div>
       <div class="sub">Paper Trading · NH Open API Ready</div>
     </div>
-    <div class="status-row">
-      <span id="systemBadge" class="badge ok">SYSTEM RUNNING</span>
-      <span id="brokerBadge" class="badge">MOCK BROKER</span>
-    </div>
+    <div class="status-row"><span id="systemBadge" class="badge ok">SYSTEM RUNNING</span><span id="brokerBadge" class="badge">MOCK BROKER</span></div>
   </header>
-
   <main class="wrap">
     <section class="grid metrics">
       <article class="card metric"><span>총자산</span><strong id="equity">₩0</strong><small id="equityPnl">오늘 손익 ₩0</small></article>
@@ -27,64 +23,36 @@
       <article class="card metric"><span>보유종목</span><strong id="positionCount">0</strong><small id="exposure">투자비중 0%</small></article>
       <article class="card metric"><span>오늘 주문</span><strong id="todayOrders">0</strong><small id="winLoss">실현손익 ₩0</small></article>
     </section>
-
     <section class="grid main-grid">
       <article class="card panel scanner-panel">
-        <div class="panel-head">
-          <div><h2>좋은 매매위치 TOP 10</h2><p>Trend · Momentum · Volume · Price · Risk 합산</p></div>
-          <button id="scanBtn" class="btn">전체 스캔</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>#</th><th>종목</th><th>현재가</th><th>등락</th><th>점수</th><th>판정</th><th></th></tr></thead>
-            <tbody id="scannerBody"></tbody>
-          </table>
-        </div>
+        <div class="panel-head"><div><h2>좋은 매매위치 TOP 10</h2><p>EMA Trend · RSI · Volume · ADX/DMI · Risk 합산</p></div><button id="scanBtn" class="btn">전체 스캔</button></div>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>종목</th><th>현재가</th><th>등락</th><th>점수</th><th>RSI/ADX</th><th>판정</th><th></th></tr></thead><tbody id="scannerBody"></tbody></table></div>
       </article>
-
       <aside class="card panel controls-panel">
         <div class="panel-head"><div><h2>자동매매</h2><p>현재는 Paper Trading만 실행</p></div></div>
-        <div class="toggle-row">
-          <div><strong>AUTO TRADE</strong><small id="autoStateText">OFF</small></div>
-          <label class="switch"><input id="autoToggle" type="checkbox"><span></span></label>
-        </div>
+        <div class="toggle-row"><div><strong>AUTO TRADE</strong><small id="autoStateText">OFF</small></div><label class="switch"><input id="autoToggle" type="checkbox"><span></span></label></div>
         <div class="riskbox">
-          <div><span>1회 최대 주문</span><strong id="maxOrderText">₩100,000</strong></div>
-          <div><span>종목 최대 비중</span><strong id="maxPositionText">10%</strong></div>
-          <div><span>동시 보유</span><strong id="maxPositionsText">5종목</strong></div>
-          <div><span>일일 손실 한도</span><strong id="dailyLossText">-1.0%</strong></div>
-          <div><span>연속 손실 정지</span><strong id="maxLossStreakText">3회</strong></div>
+          <div><span>1회 최대 주문</span><strong id="maxOrderText">₩100,000</strong></div><div><span>종목 최대 비중</span><strong id="maxPositionText">10%</strong></div><div><span>동시 보유</span><strong id="maxPositionsText">5종목</strong></div><div><span>일일 손실 한도</span><strong id="dailyLossText">-1.0%</strong></div><div><span>연속 손실 정지</span><strong id="maxLossStreakText">3회</strong></div>
         </div>
-        <button id="killBtn" class="btn danger">긴급 자동매매 중지</button>
-        <button id="resetBtn" class="btn ghost">Paper 계좌 초기화</button>
+        <button id="killBtn" class="btn danger">긴급 자동매매 중지</button><button id="resetBtn" class="btn ghost">Paper 계좌 초기화</button>
       </aside>
     </section>
-
-    <section class="grid lower-grid">
+    <section class="grid chart-grid">
       <article class="card panel">
-        <div class="panel-head"><div><h2>보유 종목</h2><p>평단 · 평가손익 · 비중</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가손익</th><th>비중</th><th></th></tr></thead><tbody id="positionsBody"></tbody></table></div>
-      </article>
-      <article class="card panel">
-        <div class="panel-head"><div><h2>전략 / 리스크 상태</h2><p>주문 전 필수 검증</p></div></div>
-        <div id="riskState" class="risk-state okbox">NORMAL</div>
-        <div class="strategy-grid" id="strategyStats"></div>
+        <div class="panel-head"><div><h2 id="chartTitle">차트</h2><p>Mock 캔들 · EMA5/20 · RSI · ADX/DMI</p></div><button id="backtestBtn" class="btn">간이 백테스트</button></div>
+        <canvas id="priceChart" class="price-chart"></canvas><div id="indicatorCards" class="indicator-grid"></div><div id="backtestResult" class="backtest-box">TOP10 종목을 눌러 차트를 선택한 뒤 백테스트를 실행하세요.</div>
       </article>
     </section>
-
     <section class="grid lower-grid">
-      <article class="card panel">
-        <div class="panel-head"><div><h2>Paper 주문 내역</h2><p>최근 주문 20건</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>시간</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>사유</th></tr></thead><tbody id="tradesBody"></tbody></table></div>
-      </article>
-      <article class="card panel">
-        <div class="panel-head"><div><h2>시스템 로그</h2><p>Scanner → Strategy → Risk → Execution</p></div></div>
-        <div id="logBox" class="logbox"></div>
-      </article>
+      <article class="card panel"><div class="panel-head"><div><h2>보유 종목</h2><p>평단 · 평가손익 · 비중</p></div></div><div class="table-wrap"><table><thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가손익</th><th>비중</th><th></th></tr></thead><tbody id="positionsBody"></tbody></table></div></article>
+      <article class="card panel"><div class="panel-head"><div><h2>전략 / 리스크 상태</h2><p>주문 전 필수 검증</p></div></div><div id="riskState" class="risk-state okbox">NORMAL</div><div class="strategy-grid" id="strategyStats"></div></article>
+    </section>
+    <section class="grid lower-grid">
+      <article class="card panel"><div class="panel-head"><div><h2>Paper 주문 내역</h2><p>최근 주문 20건</p></div></div><div class="table-wrap"><table><thead><tr><th>시간</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>사유</th></tr></thead><tbody id="tradesBody"></tbody></table></div></article>
+      <article class="card panel"><div class="panel-head"><div><h2>시스템 로그</h2><p>Scanner → Strategy → Risk → Execution</p></div></div><div id="logBox" class="logbox"></div></article>
     </section>
   </main>
-
-  <footer>Stock Trader v0.1 · 주문 엔진은 MockBroker로 격리되어 있으며 NH Open API 어댑터로 교체 가능</footer>
+  <footer>Stock Trader v0.2 · 기술지표/차트/간이 백테스트 추가 · 주문 엔진은 MockBroker로 격리</footer>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
