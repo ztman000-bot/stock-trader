@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -10,9 +11,17 @@ from collector import collector, latest_quotes, bars
 
 APP_MODE=os.getenv('APP_MODE','paper').lower()
 ENABLE_TRADING=os.getenv('ENABLE_TRADING','false').lower()=='true'
+AUTO_START_COLLECTOR=os.getenv('AUTO_START_COLLECTOR','true').lower()=='true'
 ALLOWED_ORIGINS=[x.strip() for x in os.getenv('ALLOWED_ORIGINS','https://ztman000-bot.github.io').split(',') if x.strip()]
 
-app=FastAPI(title='Stock Day Trader NH Bridge',version='0.6.0')
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if AUTO_START_COLLECTOR and _credentials_ready():
+        collector.start()
+    yield
+    collector.stop()
+
+app=FastAPI(title='Stock Day Trader NH Bridge',version='0.6.1',lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['*'])
 
 def _credentials_ready():
@@ -33,12 +42,13 @@ def health():
     return {
         'ok':True,
         'service':'stock-day-trader-nh-bridge',
-        'version':'0.6.0',
+        'version':'0.6.1',
         'mode':APP_MODE,
         'tradingEnabled':ENABLE_TRADING,
         'credentialsConfigured':_credentials_ready(),
         'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),
         'liveDataReady':_credentials_ready(),
+        'autoStartCollector':AUTO_START_COLLECTOR,
         'collector':collector.status(),
     }
 
@@ -94,4 +104,4 @@ def market_bars(code:str,limit:int=120):
 
 @app.post('/api/nh/order')
 def order_locked():
-    raise HTTPException(423,'v0.6에서는 NH 실주문이 하드락되어 있습니다. 실제 시세 수집/Paper 검증 전용입니다.')
+    raise HTTPException(423,'v0.6.1에서는 NH 실주문이 하드락되어 있습니다. 실제 시세 수집/Paper 검증 전용입니다.')
