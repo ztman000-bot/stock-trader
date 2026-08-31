@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sqlite3
 import subprocess
 import threading
@@ -10,8 +11,8 @@ from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 
-from app import app
-from collector import DB_PATH
+from app import app, run_backfill
+from collector import DB_PATH, collector
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -22,6 +23,7 @@ UPDATE_LAUNCHER = BASE_DIR / "remote_update.vbs"
 UI_VERSION = "0.10.0"
 _UPDATE = {"running": False, "requestedAt": None, "lastError": None}
 _UPDATE_LOCK = threading.Lock()
+_WARMUP = {"running": False, "done": False, "lastError": None}
 
 
 def _remote_allowed(request: Request):
@@ -52,13 +54,30 @@ def _launch_update_after_response():
         with _UPDATE_LOCK: _UPDATE.update({"running": False, "lastError": f"{type(exc).__name__}: {exc}"})
 
 
+def _warm_candidate_universe():
+    # start_stock_trader_background.cmd uses AUTO_BACKFILL=false for fast UI boot.
+    # Warm all 20 candidates here in two API-safe batches so Top10 is usable immediately.
+    time.sleep(3.0)
+    _WARMUP.update({"running": True, "done": False, "lastError": None})
+    try:
+        codes = list(collector.watchlist)
+        for i in range(0, len(codes), 10):
+            run_backfill(codes[i:i + 10])
+            time.sleep(0.8)
+        _WARMUP["done"] = True
+    except Exception as exc:
+        _WARMUP["lastError"] = f"{type(exc).__name__}: {exc}"[:500]
+    finally:
+        _WARMUP["running"] = False
+
+
 async def unified_mobile(request): return FileResponse(DASHBOARD, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 async def classic_daytrader(request): return FileResponse(CLASSIC_INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 async def root_styles(request): return FileResponse(ROOT_DIR / "styles.css", media_type="text/css", headers={"Cache-Control": "no-cache"})
 async def root_manifest(request): return FileResponse(ROOT_DIR / "manifest.webmanifest", media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 async def root_sw(request): return FileResponse(ROOT_DIR / "sw.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 async def unified_root(request): return RedirectResponse(url="/classic", status_code=307)
-async def update_status(request: Request): return JSONResponse({"ok": True, "uiVersion": UI_VERSION, **dict(_UPDATE)})
+async def update_status(request: Request): return JSONResponse({"ok": True, "uiVersion": UI_VERSION, "warmup": dict(_WARMUP), **dict(_UPDATE)})
 
 
 async def update_run(request: Request):
@@ -90,3 +109,6 @@ app.router.routes.insert(0, Route("/classic/", classic_daytrader, methods=["GET"
 app.router.routes.insert(0, Route("/dashboard", unified_mobile, methods=["GET"]))
 app.router.routes.insert(0, Route("/mobile", unified_mobile, methods=["GET"]))
 app.router.routes.insert(0, Route("/", unified_root, methods=["GET"]))
+
+if os.getenv("AUTO_BACKFILL", "true").lower() == "false":
+    threading.Thread(target=_warm_candidate_universe, daemon=True, name="candidate-universe-warmup").start()
