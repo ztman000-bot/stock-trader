@@ -16,8 +16,8 @@ window.addEventListener('unhandledrejection', e => showBootError(e.reason));
 
 const liveClassic = location.pathname === '/classic' || location.pathname.startsWith('/classic/');
 if (liveClassic) {
-  import('./ui-polish.js').catch(()=>{});
-  import('./live-app.js').catch(showBootError);
+  import('./ui-polish.js?v=110').catch(()=>{});
+  import('./live-app.js?v=110').catch(showBootError);
 } else {
   import('./app.js').catch(showBootError);
 }
