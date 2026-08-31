@@ -11,6 +11,7 @@ from nhplug import NhplugError
 load_dotenv()
 from collector import DB_PATH,KST,active_candidates,bars,collector,latest_quotes,nh_call,universe_status
 from paper_engine import BREAKEVEN_BUFFER_PCT,MAX_OPEN_POSITIONS,ROUND_TRIP_COST_EST,evaluate,scan,paper_enter,mark_positions,open_positions,daily_stats,force_close_all,recent_trades,validation_stats
+from us_collector import us_collector,latest_us_quotes,fetch_current,US_DATA_ENABLED
 VERSION='0.8.0';APP_MODE=os.getenv('APP_MODE','paper').lower();ENABLE_TRADING=False;AUTO_START_COLLECTOR=os.getenv('AUTO_START_COLLECTOR','true').lower()=='true';AUTO_BACKFILL=os.getenv('AUTO_BACKFILL','true').lower()=='true';AUTO_PAPER=os.getenv('AUTO_PAPER','true').lower()=='true';PAPER_CAPITAL=float(os.getenv('PAPER_CAPITAL','10000000'));PAPER_LOOP_SEC=max(1,float(os.getenv('PAPER_LOOP_SEC','2')));PAPER_ENTRY_START=os.getenv('PAPER_ENTRY_START','09:30');PAPER_ENTRY_CUTOFF=os.getenv('PAPER_ENTRY_CUTOFF','14:50');PAPER_EOD_EXIT=os.getenv('PAPER_EOD_EXIT','15:15');SIGNAL_MAX_AGE_SEC=max(60,int(os.getenv('SIGNAL_MAX_AGE_SEC','420')));BACKFILL_COUNT=max(30,min(int(os.getenv('BACKFILL_COUNT','120')),500));BACKFILL_MAX_CODES=max(20,min(int(os.getenv('BACKFILL_MAX_CODES','140')),200));ALLOWED_ORIGINS=[x.strip() for x in os.getenv('ALLOWED_ORIGINS','https://ztman000-bot.github.io').split(',') if x.strip()]
 _BACKFILL_STATUS={'running':False,'lastRunAt':None,'lastError':None,'results':{}};_PAPER_STATUS={'running':False,'startedAt':None,'lastCycleAt':None,'lastSignalBar':{},'lastError':None,'entries':0,'closed':0,'shadowSignals':0,'eodExits':0,'staleSignals':0};_PAPER_THREAD=None;_PAPER_STOP=threading.Event()
 def _credentials_ready():return bool(os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET'))
@@ -83,23 +84,33 @@ def stop_paper_loop():
 @asynccontextmanager
 async def lifespan(app):
  if _credentials_ready() and AUTO_START_COLLECTOR:collector.start()
+ if _credentials_ready() and US_DATA_ENABLED:us_collector.start()
  if _credentials_ready() and AUTO_BACKFILL:run_backfill()
  if AUTO_PAPER:start_paper_loop()
  yield
- stop_paper_loop();collector.stop()
+ stop_paper_loop();collector.stop();us_collector.stop()
 app=FastAPI(title='Stock Day Trader NH Bridge',version=VERSION,lifespan=lifespan);app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['*'])
 def _risk():return {'maxOpenPositions':MAX_OPEN_POSITIONS,'roundTripCostEstimatePct':round(ROUND_TRIP_COST_EST*100,3),'costCoverProtectPct':round(BREAKEVEN_BUFFER_PCT*100,3)}
 @app.get('/api/health')
-def health():return {'ok':True,'service':'stock-day-trader-nh-bridge','version':VERSION,'mode':APP_MODE,'tradingEnabled':False,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'signalMaxAgeSec':SIGNAL_MAX_AGE_SEC,'backfill':dict(_BACKFILL_STATUS),'collector':collector.status(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats(),'validation':validation_stats(),'risk':_risk()}
+def health():return {'ok':True,'service':'stock-day-trader-nh-bridge','version':VERSION,'mode':APP_MODE,'tradingEnabled':False,'credentialsConfigured':_credentials_ready(),'baseUrl':os.getenv('NHPLUG_BASE_URL','PRODUCTION_DEFAULT'),'liveDataReady':_credentials_ready(),'autoStartCollector':AUTO_START_COLLECTOR,'autoBackfill':AUTO_BACKFILL,'autoPaper':AUTO_PAPER,'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'signalMaxAgeSec':SIGNAL_MAX_AGE_SEC,'backfill':dict(_BACKFILL_STATUS),'collector':collector.status(),'usCollector':us_collector.status(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'paper':daily_stats(),'validation':validation_stats(),'risk':_risk()}
 def _mobile_payload():
  ev=scan();codes=[e['code'] for e in ev];quotes=latest_quotes(codes);pos=open_positions();qm={q['code']:q for q in latest_quotes([p['code'] for p in pos])};en=[]
  for p in pos:
   q=qm.get(p['code'],{});cur=float(q.get('price') or p['entry_price']);entry=float(p['entry_price']);qty=int(p['qty']);en.append({**p,'current_price':cur,'unrealized_pnl':(cur-entry)*qty,'unrealized_pct':(cur/entry-1)*100})
- return {'ok':True,'version':VERSION,'serverTime':datetime.now(KST).isoformat(),'tradingEnabled':False,'collector':collector.status(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'daily':daily_stats(),'validation':validation_stats(),'positions':en,'scanner':ev,'quotes':quotes,'recentTrades':recent_trades(30),'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'risk':_risk()}
+ return {'ok':True,'version':VERSION,'serverTime':datetime.now(KST).isoformat(),'tradingEnabled':False,'collector':collector.status(),'usCollector':us_collector.status(),'usQuotes':latest_us_quotes(),'universe':universe_status(),'paperLoop':dict(_PAPER_STATUS),'daily':daily_stats(),'validation':validation_stats(),'positions':en,'scanner':ev,'quotes':quotes,'recentTrades':recent_trades(30),'entryStart':PAPER_ENTRY_START,'entryCutoff':PAPER_ENTRY_CUTOFF,'eodExit':PAPER_EOD_EXIT,'risk':_risk()}
 @app.get('/api/mobile/status')
 def mobile_status():return _mobile_payload()
 @app.get('/api/validation/stats')
 def validation_report():return {'ok':True,**validation_stats()}
+@app.get('/api/us/status')
+def us_status():return {'ok':True,'collector':us_collector.status(),'quotes':latest_us_quotes(),'paperEnabled':False,'realOrderEnabled':False}
+@app.get('/api/us/test/{ticker}')
+def us_test(ticker:str):
+ ticker=ticker.strip().upper()
+ if not ticker.isalnum() or len(ticker)>10:raise HTTPException(400,'유효한 해외주식 티커가 필요합니다.')
+ try:
+  q=fetch_current(ticker);return {'ok':True,'ticker':ticker,'price':q['price'],'message':'NH 해외주식 시세 조회 성공'}
+ except Exception as e:err=_safe_error(e);raise HTTPException(502,f"NHPLUG US {err['category']} 오류 {err['code']}: {err['message']}")
 @app.get('/api/nh/test')
 def nh_test():
  if not _credentials_ready():raise HTTPException(503,'NHPLUG_APP_KEY / NHPLUG_APP_SECRET이 서버에 설정되지 않았습니다.')
