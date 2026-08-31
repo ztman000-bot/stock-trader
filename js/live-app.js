@@ -52,21 +52,24 @@ async function bootstrapUi(){
 
 async function checkConnection(){
   try{
-    const h=await api('/api/health'),safe=h.universe?.verified;
+    const h=await api('/api/health'),safe=h.universe?.verified,marketOpen=!!h.collector?.marketSession;
     $('#nhBadge').textContent=h.credentialsConfigured?'NH CONNECTED':'NH SERVER ONLY';$('#nhBadge').className='badge '+(h.credentialsConfigured?'ok':'');
     $('#brokerBadge').textContent=safe?'SAFE MASTER ON':'MASTER CHECK';$('#brokerBadge').className='badge '+(safe?'ok':'');
-    $('#nhStatusText').innerHTML=`<b>Lenovo 정상</b> · Engine v${h.version} · ${h.mode} · 안전마스터 ${safe?'검증완료':'확인중'} · REAL ORDER OFF`;
-    log(`연결 정상 · Engine ${h.version} · 안전필터 ${safe?'ON':'대기'}`);
+    $('#nhStatusText').innerHTML=`<b>Lenovo 정상</b> · Engine v${h.version} · ${h.mode} · 안전마스터 ${safe?'검증완료':'확인중'} · ${marketOpen?'KRX 장중':'KRX 장마감'} · REAL ORDER OFF`;
+    log(`연결 정상 · Engine ${h.version} · 안전필터 ${safe?'ON':'대기'} · ${marketOpen?'장중':'장마감'}`);
   }catch(e){$('#nhBadge').textContent='BACKEND OFF';$('#nhStatusText').textContent='연결 실패: '+e.message;log('연결 실패 · '+e.message)}
 }
 
 function render(d){
   lastData=d;
-  const safe=!!d.collector?.safetyVerified,u=d.universe||d.collector?.universe||{};
+  const safe=!!d.collector?.safetyVerified,marketOpen=!!d.collector?.marketSession,u=d.universe||d.collector?.universe||{};
   $('#systemBadge').textContent=d.collector.running?'SYSTEM RUNNING':'SYSTEM OFF';$('#systemBadge').className='badge '+(d.collector.running?'ok':'badbadge');
   $('#brokerBadge').textContent=safe?'SAFE FILTER ON':'SAFE CHECK';$('#brokerBadge').className='badge '+(safe?'ok':'');
-  $('#nhBadge').textContent='NH LIVE DATA';$('#nhBadge').className='badge ok';
-  $('#lockBadge').textContent=d.daily.locked?'DAILY LOCK':'TRADE READY';$('#lockBadge').className='badge '+(d.daily.locked?'badbadge':'ok');
+  $('#nhBadge').textContent=marketOpen?'NH LIVE DATA':'NH CLOSE SNAPSHOT';$('#nhBadge').className='badge '+(marketOpen?'ok':'');
+  if(d.daily.locked){$('#lockBadge').textContent='DAILY LOCK';$('#lockBadge').className='badge badbadge'}
+  else if(!marketOpen){$('#lockBadge').textContent='MARKET CLOSED';$('#lockBadge').className='badge'}
+  else{$('#lockBadge').textContent='TRADE READY';$('#lockBadge').className='badge ok'}
+
   const op=d.positions.reduce((s,x)=>s+Number(x.unrealized_pnl||0),0),capital=10000000+Number(d.daily.pnl||0)+op;
   $('#equity').textContent=won(capital);$('#equityPnl').textContent=`실현 ${won(d.daily.pnl)} · 평가 ${won(op)}`;
   $('#cash').textContent='서버 관리';$('#vault').textContent='통합 예정';$('#reserve').textContent='통합 예정';
@@ -85,8 +88,11 @@ function render(d){
   $('#positionsBody').innerHTML=d.positions.length?d.positions.map(p=>`<tr><td><b>${nameOf(p.code)}</b><br><span class="neutral">${p.code} · SERVER PAPER</span></td><td>${p.qty}</td><td>${won(p.entry_price)}</td><td>${won(p.current_price)}</td><td class="${p.unrealized_pnl>=0?'up':'down'}">${won(p.unrealized_pnl)}</td><td>${pct(p.unrealized_pct)}</td><td>자동관리</td></tr>`).join(''):'<tr><td colspan="7" class="neutral">포지션 없음</td></tr>';
   $('#tradesBody').innerHTML=d.recentTrades?.length?d.recentTrades.slice(0,30).map(t=>`<tr><td>${t.exit_at?new Date(t.exit_at).toLocaleTimeString('ko-KR',{hour12:false}):'-'}</td><td>${labelOf(t.code)}</td><td>CLOSE</td><td>${t.qty}</td><td>${t.exit_price?won(t.exit_price):'-'}</td><td class="${Number(t.pnl||0)>=0?'up':'down'}">${won(t.pnl)}</td><td>${t.exit_reason||t.status}</td></tr>`).join(''):'<tr><td colspan="7" class="neutral">거래 없음</td></tr>';
 
-  $('#riskState').textContent=d.daily.locked?'DAILY LOCK · 신규진입 중지 · Shadow 계속':safe?'NORMAL · 안전필터 ON · 비용반영 Risk':'SAFETY WAIT · 신규진입 차단';
-  $('#riskState').className='risk-state '+(d.daily.locked||!safe?'badbox':'okbox');
+  let riskText='NORMAL · 안전필터 ON · 비용반영 Risk',riskClass='okbox';
+  if(d.daily.locked){riskText='DAILY LOCK · 신규진입 중지 · Shadow 계속';riskClass='badbox'}
+  else if(!safe){riskText='SAFETY WAIT · 신규진입 차단';riskClass='badbox'}
+  else if(!marketOpen){riskText='MARKET CLOSED · 시세 스냅샷/분석만 유지';riskClass='okbox'}
+  $('#riskState').textContent=riskText;$('#riskState').className='risk-state '+riskClass;
   $('#strategyStats').innerHTML=`<div><small>Safe Universe</small><strong>${u.selectedRows||0}</strong></div><div><small>Active Focus</small><strong>${all.length}/30</strong></div><div><small>Entry Window</small><strong>${d.entryStart||'09:30'}~${d.entryCutoff}</strong></div><div><small>EOD Exit</small><strong>${d.eodExit}</strong></div><div><small>Cost Est.</small><strong>${Number(d.risk?.roundTripCostEstimatePct||0).toFixed(2)}%</strong></div><div><small>Max Positions</small><strong>${d.risk?.maxOpenPositions||2}</strong></div>`;
   $('#learningBox').innerHTML=`<div class="learning-stats"><b>Shadow ${d.paperLoop.shadowSignals||0}</b><b>종료 ${d.daily.closedTrades||0}</b><b>연속손실 ${d.daily.consecutiveLosses||0}/2</b></div><p>관리·거래정지·정리매매·투자경고 등 위험종목은 공식 NH 종목마스터 단계에서 제외합니다. 개장 30분 이후 ORB30 + VWAP/EMA + 유동성 + RSI/ADX를 통과한 종목만 Paper 진입 후보가 됩니다.</p>`;
   if((!selectedCode||!all.some(x=>x.code===selectedCode))&&ss.length)selectedCode=ss[0].code;
