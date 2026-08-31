@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 
 from collector import DB_PATH, KST, nh_call, collector, PROTECTED_CODES
 
+# Research-only liquid market proxies. Never routed to the order engine.
+REGIME_PROXY_CODES = ['069500','229200']  # KODEX 200 / KODEX KOSDAQ150
 _LOCK = threading.Lock()
 _STOP = threading.Event()
 _THREAD = None
@@ -80,6 +82,8 @@ def _worker(days, max_codes):
     try:
         collector.wait_for_universe(timeout=20)
         codes=[c for c in list(collector.watchlist) if c not in PROTECTED_CODES][:max_codes]
+        for code in REGIME_PROXY_CODES:
+            if code not in codes: codes.append(code)
         dates=_trading_dates(days)
         with _LOCK:
             STATUS.update({'running':True,'startedAt':datetime.now(KST).isoformat(),'finishedAt':None,
@@ -122,4 +126,5 @@ def status():
     with _LOCK:
         s=dict(STATUS)
     total=max(1,int(s.get('totalJobs') or 0)); s['progressPct']=round(int(s.get('completedJobs') or 0)/total*100,1) if s.get('totalJobs') else 0
+    s['regimeProxyCodes']=list(REGIME_PROXY_CODES)
     return s
