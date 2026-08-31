@@ -1,17 +1,30 @@
 export const CONFIG = {
   initialCash: 10_000_000,
   scanIntervalMs: 5000,
-  risk: {
-    maxOrderWon: 100_000,
-    maxPositionPct: 0.10,
-    maxPositions: 5,
-    dailyLossPct: 0.01,
-    maxLossStreak: 3,
+  protectedSymbols: ['068270'],
+  dayTrading: {
+    entryVolumeRatio: 1.5,
+    rsiMin: 50,
+    rsiMax: 75,
+    adxMin: 18,
+    breakoutLookback: 8,
+    stopLossPct: 0.010,
+    takeProfitPct: 0.015,
+    trailingTriggerPct: 0.010,
+    trailingGapPct: 0.006,
+    shadowBars: 12,
   },
-  strategy: {
-    buyScore: 84,
-    sellScore: 62,
-    takeProfitPct: 0.035,
-    stopLossPct: 0.020,
+  risk: {
+    maxOrderWon: 300_000,
+    maxPositionPct: 0.12,
+    maxPositions: 3,
+    dailyLossPct: 0.01,
+    maxLossStreak: 2,
+    riskPerTradePct: 0.0035,
+  },
+  profitSplit: {
+    reinvestPct: 0.40,
+    vaultPct: 0.50,
+    reservePct: 0.10,
   }
 };
