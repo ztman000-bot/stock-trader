@@ -4,9 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from nhplug import call, NhplugError
 
-from collector import collector, latest_quotes, bars
-
 load_dotenv()
+
+from collector import collector, latest_quotes, bars
 
 APP_MODE=os.getenv('APP_MODE','paper').lower()
 ENABLE_TRADING=os.getenv('ENABLE_TRADING','false').lower()=='true'
