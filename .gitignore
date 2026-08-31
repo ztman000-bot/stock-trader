@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+server/*.db
+server/*.db-wal
+server/*.db-shm
