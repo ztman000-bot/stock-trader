@@ -1,7 +1,13 @@
 export const CONFIG = {
+  version: '0.4',
   initialCash: 10_000_000,
   scanIntervalMs: 5000,
   protectedSymbols: ['068270'],
+  nh: {
+    backendBaseUrl: '',
+    preferLiveQuotes: false,
+    readOnly: true,
+  },
   dayTrading: {
     entryVolumeRatio: 1.5,
     rsiMin: 50,
