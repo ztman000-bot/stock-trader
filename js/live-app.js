@@ -1,0 +1,65 @@
+// Classic Day Trader UI adapter for Lenovo/NH backend.
+// Keeps the familiar v0.4 layout, but all displayed trading state comes from
+// the same server engine used by Unified UI. Real orders remain locked.
+
+const $=s=>document.querySelector(s);
+const won=n=>'₩'+Math.round(Number(n||0)).toLocaleString('ko-KR');
+const pct=n=>(Number(n||0)>=0?'+':'')+Number(n||0).toFixed(2)+'%';
+let selectedCode='005930', lastData=null, updating=false;
+
+function log(msg){const box=$('#logBox');if(!box)return;const d=document.createElement('div');d.className='logline';d.innerHTML=`<span>${new Date().toLocaleTimeString('ko-KR',{hour12:false})}</span> ${msg}`;box.prepend(d);while(box.children.length>60)box.lastChild.remove();}
+function actionClass(a){return a==='BUY_CANDIDATE'?'up':a==='SETUP'?'warn':'neutral'}
+function checks(ev){const c=ev.checks||{};return Object.values(c).filter(Boolean).length;}
+function reasonText(ev){return (ev.reasons||[]).join(', ')||'조건 대기';}
+
+async function api(path,opt){const r=await fetch(path,{cache:'no-store',...opt});let j={};try{j=await r.json()}catch{}if(!r.ok)throw new Error(j.detail||`HTTP ${r.status}`);return j;}
+
+function bootstrapUi(){
+ const brand=document.querySelector('.brand');if(brand)brand.innerHTML='Stock Day Trader <span>v0.9.0 LIVE</span>';
+ const sub=document.querySelector('.sub');if(sub)sub.textContent='NH 실제 시세 · 서버 Paper Trading · 2연패 Daily Lock · Shadow Learning';
+ const panel=$('.connection-panel .panel-head');if(panel){
+   const tools=panel.querySelector('div:last-child');
+   const b=document.createElement('button');b.id='remoteUpdateBtn';b.className='btn';b.textContent='프로그램 업데이트';b.style.marginLeft='8px';panel.appendChild(b);b.onclick=runUpdate;
+ }
+ if($('#backendUrl')){$('#backendUrl').value=location.origin;$('#backendUrl').readOnly=true;}
+ if($('#saveBackendBtn')){$('#saveBackendBtn').style.display='none';}
+ if($('#nhCheckBtn'))$('#nhCheckBtn').onclick=checkConnection;
+ if($('#scanBtn'))$('#scanBtn').onclick=load;
+ if($('#backtestBtn')){$('#backtestBtn').disabled=true;$('#backtestBtn').title='서버 실데이터 백테스트 엔진 연결 예정';}
+ if($('#autoToggle')){$('#autoToggle').disabled=true;$('#autoToggle').checked=true;}
+ if($('#autoStateText'))$('#autoStateText').textContent='SERVER PAPER';
+ if($('#killBtn')){$('#killBtn').disabled=true;$('#killBtn').textContent='실주문 잠금 유지';}
+ if($('#resetBtn')){$('#resetBtn').disabled=true;$('#resetBtn').textContent='서버 데이터 보호';}
+ if($('#maxOrderText'))$('#maxOrderText').textContent='서버 Risk 기준';
+ if($('#riskTradeText'))$('#riskTradeText').textContent='0.35%';
+ if($('#maxPositionsText'))$('#maxPositionsText').textContent='서버 관리';
+ if($('#exitText'))$('#exitText').textContent='-1.0% / +1.5% + Trail';
+ const footer=document.querySelector('footer');if(footer)footer.textContent='Stock Day Trader v0.9.0 LIVE · Lenovo/NH backend · Tailscale · REAL ORDER OFF';
+}
+
+async function checkConnection(){try{const h=await api('/api/health');$('#nhBadge').textContent=h.credentialsConfigured?'NH CONNECTED':'NH SERVER ONLY';$('#nhBadge').className='badge '+(h.credentialsConfigured?'ok':'');$('#brokerBadge').textContent='NH LIVE BACKEND';$('#brokerBadge').className='badge ok';$('#nhStatusText').innerHTML=`<b>Lenovo 백엔드 정상</b> · Engine v${h.version} · ${h.mode} · 실주문 LOCKED · NH credentials ${h.credentialsConfigured?'READY':'미설정'}`;log('NH/Lenovo 백엔드 연결 정상');}catch(e){$('#nhBadge').textContent='BACKEND OFF';$('#nhStatusText').textContent='연결 실패: '+e.message;log('연결 실패 · '+e.message)}}
+
+function render(d){lastData=d;
+ $('#systemBadge').textContent=d.collector.running?'SYSTEM RUNNING':'SYSTEM OFF';$('#systemBadge').className='badge '+(d.collector.running?'ok':'badbadge');
+ $('#brokerBadge').textContent='NH LIVE DATA';$('#brokerBadge').className='badge ok';$('#nhBadge').textContent='NH CONNECTED';$('#nhBadge').className='badge ok';
+ $('#lockBadge').textContent=d.daily.locked?'DAILY LOCK':'TRADE READY';$('#lockBadge').className='badge '+(d.daily.locked?'badbadge':'ok');
+ const openPnl=d.positions.reduce((s,x)=>s+Number(x.unrealized_pnl||0),0), capital=10000000+Number(d.daily.pnl||0)+openPnl;
+ $('#equity').textContent=won(capital);$('#equityPnl').textContent=`오늘 실현 ${won(d.daily.pnl)} · 평가 ${won(openPnl)}`;$('#cash').textContent='서버 관리';$('#vault').textContent='학습 예정';$('#reserve').textContent='학습 예정';$('#lossStreak').textContent=`${d.daily.consecutiveLosses} / 2`;$('#shadowCount').textContent=d.paperLoop.shadowSignals||0;$('#shadowWin').textContent='Server Shadow';
+ const ss=[...d.scanner].sort((a,b)=>Number(b.score||0)-Number(a.score||0));
+ $('#scannerBody').innerHTML=ss.map((s,i)=>{const ind=s.indicators||{},prot=s.code==='068270';return `<tr class="pick-row" data-code="${s.code}"><td>${i+1}</td><td><b>${s.code}</b>${prot?' <span class="protected">PROTECTED</span>':''}</td><td>${ind.price?won(ind.price):'-'}</td><td>-</td><td><span class="score">${Number(s.score||0).toFixed(1)}</span></td><td>${ind.vwap?won(ind.vwap):'-'}</td><td>${ind.volumeRatio?Number(ind.volumeRatio).toFixed(2)+'x':'-'}</td><td class="${actionClass(s.action)}">${s.action}</td><td><span class="neutral">서버 자동</span></td></tr>`}).join('')||'<tr><td colspan="9" class="neutral">Scanner 데이터 없음</td></tr>';
+ document.querySelectorAll('.pick-row').forEach(r=>r.onclick=()=>{selectedCode=r.dataset.code;renderSelected();});
+ $('#positionsBody').innerHTML=d.positions.length?d.positions.map(p=>`<tr><td><b>${p.code}</b><br><span class="neutral">SERVER PAPER</span></td><td>${p.qty}</td><td>${won(p.entry_price)}</td><td>${won(p.current_price)}</td><td class="${p.unrealized_pnl>=0?'up':'down'}">${won(p.unrealized_pnl)}</td><td>${pct(p.unrealized_pct)}</td><td>자동관리</td></tr>`).join(''):'<tr><td colspan="7" class="neutral">Day Trading 포지션이 없습니다.</td></tr>';
+ $('#tradesBody').innerHTML=d.recentTrades?.length?d.recentTrades.slice(0,30).map(t=>`<tr><td>${t.exit_at?new Date(t.exit_at).toLocaleTimeString('ko-KR',{hour12:false}):'-'}</td><td>${t.code}</td><td class="down">CLOSE</td><td>${t.qty}</td><td>${t.exit_price?won(t.exit_price):'-'}</td><td class="${Number(t.pnl||0)>=0?'up':'down'}">${won(t.pnl)}</td><td>${t.exit_reason||t.status}</td></tr>`).join(''):'<tr><td colspan="7" class="neutral">아직 주문이 없습니다.</td></tr>';
+ $('#riskState').textContent=d.daily.locked?'DAILY LOCK · 신규 진입 중지 · Shadow 계속':'NORMAL · SERVER ENTRY GATE ACTIVE';$('#riskState').className='risk-state '+(d.daily.locked?'badbox':'okbox');
+ $('#strategyStats').innerHTML=`<div><small>Engine</small><strong>v${d.version}</strong></div><div><small>Entry Cutoff</small><strong>${d.entryCutoff}</strong></div><div><small>EOD Exit</small><strong>${d.eodExit}</strong></div><div><small>Paper Loop</small><strong>${d.paperLoop.running?'RUNNING':'STOP'}</strong></div><div><small>Stale 차단</small><strong>${d.paperLoop.staleSignals||0}</strong></div><div><small>Protected</small><strong>068270</strong></div>`;
+ $('#learningBox').innerHTML=`<div class="learning-stats"><b>Shadow Signals ${d.paperLoop.shadowSignals||0}</b><b>오늘 종료 거래 ${d.daily.closedTrades||0}</b><b>연속 손실 ${d.daily.consecutiveLosses||0}/2</b></div><p>실전 파라미터는 자동 변경하지 않습니다. 서버가 Scanner/Paper/Lock 데이터를 계속 축적합니다.</p><small>※ Profit Vault 40/50/10 및 고급 실패원인 학습은 서버 엔진 단계적으로 통합 예정</small>`;
+ if(!selectedCode&&ss.length)selectedCode=ss[0].code;renderSelected();
+}
+
+async function renderSelected(){if(!lastData)return;const s=lastData.scanner.find(x=>x.code===selectedCode)||lastData.scanner[0];if(!s)return;selectedCode=s.code;const i=s.indicators||{};$('#chartTitle').textContent=`${s.code} · NH 5분봉`;$('#indicatorCards').innerHTML=`<div><small>판정</small><strong>${s.action}</strong></div><div><small>Score</small><strong>${Number(s.score||0).toFixed(1)}</strong></div><div><small>VWAP</small><strong>${i.vwap?won(i.vwap):'-'}</strong></div><div><small>EMA9/20</small><strong>${i.ema9&&i.ema20?Math.round(i.ema9).toLocaleString()+' / '+Math.round(i.ema20).toLocaleString():'-'}</strong></div><div><small>RSI</small><strong>${i.rsi!=null?Number(i.rsi).toFixed(1):'-'}</strong></div><div><small>ADX</small><strong>${i.adx!=null?Number(i.adx).toFixed(1):'-'}</strong></div>`;$('#backtestResult').textContent=`${reasonText(s)} · 서버 실제 완료봉 기준`;try{const j=await api(`/api/market/bars/${s.code}?limit=80`);drawChart(j.rows||j.bars||[])}catch(e){log('차트 오류 · '+e.message)}}
+function drawChart(rows){const c=$('#priceChart');if(!c)return;const ctx=c.getContext('2d'),r=devicePixelRatio||1,w=c.clientWidth||600,h=c.clientHeight||300;c.width=w*r;c.height=h*r;ctx.setTransform(r,0,0,r,0,0);ctx.clearRect(0,0,w,h);if(rows.length<2){ctx.fillStyle='#94a3b8';ctx.fillText('5분봉 데이터 없음',12,22);return}rows=[...rows].reverse();const v=rows.map(x=>Number(x.close)),lo0=Math.min(...v),hi0=Math.max(...v),pad=(hi0-lo0||1)*.12,lo=lo0-pad,hi=hi0+pad;ctx.strokeStyle='#334155';for(let k=1;k<4;k++){let y=h*k/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}ctx.strokeStyle='#60a5fa';ctx.lineWidth=2;ctx.beginPath();v.forEach((p,n)=>{const x=6+n/(v.length-1)*(w-12),y=h-10-(p-lo)/(hi-lo)*(h-20);n?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();}
+
+async function load(){try{const d=await api('/api/mobile/status');render(d)}catch(e){$('#systemBadge').textContent='SERVER OFF';$('#systemBadge').className='badge badbadge';log('데이터 갱신 실패 · '+e.message)}}
+async function runUpdate(){if(updating)return;if(lastData?.positions?.length){alert('열린 Paper 포지션이 있어 업데이트할 수 없습니다.');return}if(!confirm('GitHub 최신 버전으로 업데이트하고 Lenovo 서버를 재시작할까요?'))return;updating=true;const b=$('#remoteUpdateBtn');if(b){b.disabled=true;b.textContent='업데이트 중...'}try{await api('/api/system/update/run',{method:'POST'});log('원격 업데이트 시작 · 서버 재시작 대기');}catch(e){if(!String(e.message).includes('Failed to fetch')){alert('업데이트 차단: '+e.message);updating=false;if(b){b.disabled=false;b.textContent='프로그램 업데이트'}return}}let n=0,t=setInterval(async()=>{n++;try{await api('/api/health');if(n>2){clearInterval(t);location.reload()}}catch{}if(n>60){clearInterval(t);updating=false;if(b){b.disabled=false;b.textContent='프로그램 업데이트'}alert('재연결 시간이 초과되었습니다. 잠시 후 새로고침하세요.')}},2000)}
+
+bootstrapUi();checkConnection();load();setInterval(()=>{if(!updating)load()},5000);addEventListener('resize',()=>renderSelected());log('Classic Day Trader LIVE adapter 시작 · REAL ORDER OFF');
