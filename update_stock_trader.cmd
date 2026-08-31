@@ -1,61 +1,90 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0"
-title Stock Trader - One Click Update
+title Stock Trader - One Click Start / Update
 
 echo ======================================================
-echo   Stock Trader - GitHub Update + Server Restart
+echo   NH Stock Trader - One Click Update + Start
 echo ======================================================
 echo.
 
 where git >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Git was not found in PATH.
-  echo Please install Git for Windows or fix PATH.
   pause
   exit /b 1
 )
 
 if not exist ".git" (
-  echo [ERROR] This file must be run from the stock-trader repository root.
+  echo [ERROR] Run this file from the stock-trader repository root.
   echo Current folder: %CD%
   pause
   exit /b 1
 )
 
-echo [1/4] Checking local changes...
+if not exist "server\.venv\Scripts\python.exe" (
+  echo [ERROR] server\.venv\Scripts\python.exe was not found.
+  pause
+  exit /b 1
+)
+
+echo [1/6] Checking local changes...
 git status --porcelain > "%TEMP%\stock_trader_git_status.txt"
 for %%A in ("%TEMP%\stock_trader_git_status.txt") do if %%~zA GTR 0 (
   echo.
   echo [STOP] Local changes exist. Update was NOT applied to protect your files.
   git status --short
-  echo.
-  echo Commit/stash the changes first, then run this updater again.
   del "%TEMP%\stock_trader_git_status.txt" >nul 2>&1
   pause
   exit /b 2
 )
 del "%TEMP%\stock_trader_git_status.txt" >nul 2>&1
 
-echo [2/4] Downloading latest code from GitHub...
+echo [2/6] Downloading latest code from GitHub...
 git pull --ff-only
 if errorlevel 1 (
-  echo.
   echo [ERROR] git pull failed. Existing local version was preserved.
   pause
   exit /b 3
 )
 
-echo [3/4] Stopping old local server if running...
+echo [3/6] Checking Python dependencies...
+"server\.venv\Scripts\python.exe" -m pip install -r "server\requirements.txt" --disable-pip-version-check >nul
+if errorlevel 1 (
+  echo [WARNING] Dependency update failed. Existing installed packages will be used.
+) else (
+  echo Dependencies OK.
+)
+
+echo [4/6] Checking Tailscale...
+set "TAILSCALE_EXE="
+where tailscale >nul 2>&1
+if not errorlevel 1 set "TAILSCALE_EXE=tailscale"
+if not defined TAILSCALE_EXE if exist "%ProgramFiles%\Tailscale\tailscale.exe" set "TAILSCALE_EXE=%ProgramFiles%\Tailscale\tailscale.exe"
+if not defined TAILSCALE_EXE if exist "%LocalAppData%\Tailscale\tailscale.exe" set "TAILSCALE_EXE=%LocalAppData%\Tailscale\tailscale.exe"
+
+set "TAILSCALE_IP="
+if defined TAILSCALE_EXE (
+  for /f "usebackq delims=" %%I in (`"!TAILSCALE_EXE!" ip -4 2^>nul`) do if not defined TAILSCALE_IP set "TAILSCALE_IP=%%I"
+)
+
+if defined TAILSCALE_IP (
+  echo Tailscale ONLINE: !TAILSCALE_IP!
+) else (
+  echo [INFO] Tailscale IP was not detected.
+  echo        If remote phone access is needed, open Tailscale and connect.
+)
+
+echo [5/6] Stopping old Stock Trader server if running...
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":8000 .*LISTENING"') do (
   echo Stopping PID %%P on port 8000...
   taskkill /PID %%P /F >nul 2>&1
 )
 timeout /t 2 /nobreak >nul
 
-echo [4/4] Starting updated Stock Trader server...
+echo [6/6] Starting Stock Trader server...
 if not exist "server\start_stock_trader.cmd" (
   echo [ERROR] server\start_stock_trader.cmd was not found.
   pause
@@ -63,16 +92,31 @@ if not exist "server\start_stock_trader.cmd" (
 )
 start "Stock Trader Server" /D "%CD%\server" cmd /k "start_stock_trader.cmd"
 
-echo.
-echo ======================================================
-echo   UPDATE COMPLETE
+echo Waiting for server health check...
+set "SERVER_OK="
+for /L %%N in (1,1,20) do (
+  powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if($r.ok){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>&1
+  if not errorlevel 1 (
+    set "SERVER_OK=1"
+    goto :server_ready
+  )
+  timeout /t 1 /nobreak >nul
+)
 
-echo   Health check: http://127.0.0.1:8000/api/health
+:server_ready
+echo.
+echo ======================================================
+if defined SERVER_OK (
+  echo   STOCK TRADER ONLINE
+  echo   PC Dashboard: http://127.0.0.1:8000/mobile
+  if defined TAILSCALE_IP echo   Phone Dashboard: http://!TAILSCALE_IP!:8000/mobile
+) else (
+  echo   [WARNING] Server health check did not respond yet.
+  echo   Check the Stock Trader Server window/log.
+)
 echo ======================================================
 echo.
-echo Waiting a few seconds for server startup...
-timeout /t 7 /nobreak >nul
-start "" "http://127.0.0.1:8000/api/health"
+if defined SERVER_OK start "" "http://127.0.0.1:8000/mobile"
 
 endlocal
 exit /b 0
