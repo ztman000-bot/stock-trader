@@ -19,7 +19,7 @@ DASHBOARD = BASE_DIR / 'unified_dashboard.html'
 CLASSIC_INDEX = ROOT_DIR / 'index.html'
 UPDATE_SCRIPT = BASE_DIR / 'remote_update.cmd'
 UPDATE_LAUNCHER = BASE_DIR / 'remote_update.vbs'
-UI_VERSION = '0.11.0'
+UI_VERSION = '0.11.1'
 _UPDATE = {'running': False, 'requestedAt': None, 'lastError': None}
 _UPDATE_LOCK = threading.Lock()
 
@@ -114,7 +114,7 @@ async def update_run(request: Request):
         'ok': True,
         'accepted': True,
         'uiVersion': UI_VERSION,
-        'message': '업데이트 요청 접수 완료. 약 2초 후 서버 재시작을 시작합니다.',
+        'message': '업데이트 요청 접수 완료. 약 2초 후 안전 재시작을 시작합니다.',
     })
 
 
