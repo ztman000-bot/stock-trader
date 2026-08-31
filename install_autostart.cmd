@@ -14,11 +14,19 @@ set "WATCHVBS=%STARTUP%\StockTraderWatchdog.vbs"
 echo [OK] Stock Trader background autostart installed.
 echo [OK] 60-second health watchdog installed.
 echo [INFO] Tailscale remains managed by its Windows app/service.
+
+rem Start server now if needed.
 start "" wscript.exe "%VBS%"
+timeout /t 3 /nobreak >nul
+
+rem Start watchdog in this Windows session too. The watchdog owns a singleton lock,
+rem so running this installer repeatedly is safe.
 start "" wscript.exe "%WATCHVBS%"
-timeout /t 5 /nobreak >nul
+timeout /t 3 /nobreak >nul
+
 powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 4; Write-Host ('[OK] Server ONLINE - v' + $r.version) } catch { Write-Host '[WARN] Health check failed. Watchdog will retry.' }"
+powershell -NoProfile -Command "$p=Get-CimInstance Win32_Process -Filter \"Name='wscript.exe'\" | Where-Object { $_.CommandLine -like '*StockTraderWatchdog.vbs*' }; if($p){ Write-Host ('[OK] Watchdog ACTIVE - PID ' + (($p.ProcessId -join ','))) } else { Write-Host '[WARN] Watchdog process not detected.' }"
 echo.
-echo INSTALL COMPLETE - server + watchdog start after Windows login.
+echo INSTALL COMPLETE - server + watchdog active now and after Windows login.
 pause
 endlocal
