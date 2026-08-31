@@ -12,4 +12,5 @@ server/*.db-wal
 server/*.db-shm
 server/stock_trader_server.log
 server/stock_trader_startup.log
+server/stock_trader_watchdog.log
 server/remote_update.log
