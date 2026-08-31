@@ -7,8 +7,8 @@ from starlette.staticfiles import StaticFiles
 from app import app
 from collector import DB_PATH
 from historical_accumulator import start as history_start_job, stop as history_stop_job, status as history_job_status
-from strategy_lab import run_lab
-BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.1';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
+from strategy_lab import run_lab,run_exit_lab
+BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UI_VERSION='0.16.2';_UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'};_UPDATE_LOCK=threading.Lock()
 def _remote_allowed(request):
  host=(request.client.host if request.client else '') or '';return host in ('127.0.0.1','::1') or host.startswith('100.')
 def _has_open_positions():
@@ -44,18 +44,19 @@ def update_status(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION
 def strategy_lab(request):
  try:return JSONResponse(run_lab(int(request.query_params.get('max_codes','40'))))
  except Exception as exc:return JSONResponse({'ok':False,'error':f'Strategy Lab 오류: {type(exc).__name__}: {exc}'},500)
+def exit_lab(request):
+ try:return JSONResponse(run_exit_lab(request.query_params.get('strategy','orb_rvol')))
+ except Exception as exc:return JSONResponse({'ok':False,'error':f'Exit Lab 오류: {type(exc).__name__}: {exc}'},500)
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 def history_start(request):
  try:
-  result=history_start_job(int(request.query_params.get('days','20')),int(request.query_params.get('max_codes','40')))
-  return JSONResponse(result,200 if result.get('ok') else 409)
+  result=history_start_job(int(request.query_params.get('days','20')),int(request.query_params.get('max_codes','40')));return JSONResponse(result,200 if result.get('ok') else 409)
  except Exception as exc:return JSONResponse({'ok':False,'error':str(exc)},500)
 def history_stop(request):return JSONResponse(history_stop_job())
-def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.1','control':'v0.8.0 LOCKED','challengers':['ORB + RVOL','VWAP Pullback','Momentum + ADX/DMI','First Pullback'],'liveMutation':False},'backtest':{'enabled':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
+def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'strategyLab':{'enabled':True,'version':'0.16.2','control':'v0.8.0 LOCKED','exitCostLab':True,'liveMutation':False},'backtest':{'enabled':True,'engine':'precise-portfolio-v1','fidelity':'portfolio-high','executionModel':'next-bar-open','portfolioConstraints':True,'costsIncluded':True,'liveMutation':False},'usMarket':{'collector':True,'paper':False,'realOrder':False}})
 def root(request):return RedirectResponse('/classic')
 def classic(request):return FileResponse(CLASSIC_INDEX,headers={'Cache-Control':'no-store, max-age=0'})
 def dashboard(request):return FileResponse(DASHBOARD,headers={'Cache-Control':'no-store, max-age=0'})
 def static_file(request):
- p=ROOT_DIR/request.url.path.lstrip('/')
- return FileResponse(p,headers={'Cache-Control':'no-store, max-age=0'}) if p.exists() and p.is_file() else JSONResponse({'error':'not found'},404)
-app.router.routes.extend([Route('/',root),Route('/classic',classic),Route('/dashboard',dashboard),Route('/api/system/update',update_request,methods=['POST']),Route('/api/system/update/run',update_request,methods=['POST']),Route('/api/system/update/status',update_status),Route('/api/system/ui-health',ui_health),Route('/api/strategy-lab/run',strategy_lab),Route('/api/history/status',history_status),Route('/api/history/start',history_start,methods=['POST']),Route('/api/history/stop',history_stop,methods=['POST']),Route('/styles.css',static_file),Route('/manifest.webmanifest',static_file),Route('/sw.js',static_file),Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')])
+ p=ROOT_DIR/request.url.path.lstrip('/');return FileResponse(p,headers={'Cache-Control':'no-store, max-age=0'}) if p.exists() and p.is_file() else JSONResponse({'error':'not found'},404)
+app.router.routes.extend([Route('/',root),Route('/classic',classic),Route('/dashboard',dashboard),Route('/api/system/update',update_request,methods=['POST']),Route('/api/system/update/run',update_request,methods=['POST']),Route('/api/system/update/status',update_status),Route('/api/system/ui-health',ui_health),Route('/api/strategy-lab/run',strategy_lab),Route('/api/strategy-lab/exit',exit_lab),Route('/api/history/status',history_status),Route('/api/history/start',history_start,methods=['POST']),Route('/api/history/stop',history_stop,methods=['POST']),Route('/styles.css',static_file),Route('/manifest.webmanifest',static_file),Route('/sw.js',static_file),Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')])
