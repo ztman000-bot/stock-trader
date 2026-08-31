@@ -2,31 +2,49 @@
 setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
-title Stock Trader - Install Autostart
+title Stock Trader - Install Supervisor v0.11.5
+
 if not exist "server\.venv\Scripts\python.exe" (echo [ERROR] server\.venv Python not found.&pause&exit /b 1)
+if not exist "server\supervisor_stock_trader.cmd" (echo [ERROR] supervisor script not found.&pause&exit /b 1)
+
 set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-set "VBS=%STARTUP%\StockTraderAutoStart.vbs"
-set "WATCHVBS=%STARTUP%\StockTraderWatchdog.vbs"
-> "%VBS%" echo Set sh = CreateObject("WScript.Shell")
->> "%VBS%" echo sh.Run Chr(34) ^& "%CD%\server\start_stock_trader_background.cmd" ^& Chr(34), 0, False
-> "%WATCHVBS%" echo Set sh = CreateObject("WScript.Shell")
->> "%WATCHVBS%" echo sh.Run Chr(34) ^& "%CD%\server\watchdog_stock_trader.cmd" ^& Chr(34), 0, False
-echo [OK] Stock Trader background autostart installed.
-echo [OK] 60-second health watchdog installed.
+set "OLDVBS=%STARTUP%\StockTraderWatchdog.vbs"
+set "OLDSTART=%STARTUP%\StockTraderAutoStart.vbs"
+
+rem Remove legacy persistent VBS watchdog/startup paths. Task Scheduler is now the owner.
+if exist "%OLDVBS%" del /q "%OLDVBS%" >nul 2>&1
+if exist "%OLDSTART%" del /q "%OLDSTART%" >nul 2>&1
+
+echo [1/4] Installing Windows Task Scheduler supervisor...
+schtasks /Delete /TN "StockTraderWatchdog" /F >nul 2>&1
+schtasks /Delete /TN "StockTraderAutoStart" /F >nul 2>&1
+schtasks /Delete /TN "StockTraderSupervisor" /F >nul 2>&1
+
+rem One idempotent supervisor check every minute. It starts the server only when health is bad.
+schtasks /Create /TN "StockTraderSupervisor" /SC MINUTE /MO 1 /TR "cmd.exe /c \"%CD%\server\supervisor_stock_trader.cmd\"" /F >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Could not create StockTraderSupervisor task.
+  echo [INFO] Run this installer with Administrator privileges.
+  pause
+  exit /b 2
+)
+
+echo [OK] StockTraderSupervisor scheduled every 1 minute.
+
+echo [2/4] Starting supervisor now...
+schtasks /Run /TN "StockTraderSupervisor" >nul 2>&1
+timeout /t 5 /nobreak >nul
+
+echo [3/4] Checking server + UI health...
+powershell -NoProfile -Command "try { $h=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 4; $u=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/system/ui-health' -TimeoutSec 4; if($h.ok -and $u.ok){Write-Host ('[OK] Server/UI ONLINE - engine v' + $h.version + ' / UI ' + $u.uiVersion); exit 0}else{exit 1} } catch { Write-Host '[WARN] Initial health check not ready; scheduled supervisor will retry.'; exit 0 }"
+
+echo [4/4] Verifying scheduled task...
+schtasks /Query /TN "StockTraderSupervisor" >nul 2>&1
+if errorlevel 1 (echo [ERROR] Supervisor task verification failed.&pause&exit /b 3)
+echo [OK] Supervisor task installed and verified.
 echo [INFO] Tailscale remains managed by its Windows app/service.
-
-rem Start server now if needed.
-start "" wscript.exe "%VBS%"
-timeout /t 3 /nobreak >nul
-
-rem Start watchdog in this Windows session too. The watchdog owns a singleton lock,
-rem so running this installer repeatedly is safe.
-start "" wscript.exe "%WATCHVBS%"
-timeout /t 3 /nobreak >nul
-
-powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 4; Write-Host ('[OK] Server ONLINE - v' + $r.version) } catch { Write-Host '[WARN] Health check failed. Watchdog will retry.' }"
-powershell -NoProfile -Command "$p=Get-CimInstance Win32_Process -Filter \"Name='wscript.exe'\" | Where-Object { $_.CommandLine -like '*StockTraderWatchdog.vbs*' }; if($p){ Write-Host ('[OK] Watchdog ACTIVE - PID ' + (($p.ProcessId -join ','))) } else { Write-Host '[WARN] Watchdog process not detected.' }"
 echo.
-echo INSTALL COMPLETE - server + watchdog active now and after Windows login.
+echo INSTALL COMPLETE - Task Scheduler now owns Stock Trader recovery.
+echo Screen lock does not stop this scheduled supervisor while Windows remains signed in.
 pause
 endlocal
