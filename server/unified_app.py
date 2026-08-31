@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 import subprocess
 import threading
 import time
@@ -10,7 +11,7 @@ from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 
 from app import app
-from paper_engine import open_positions
+from collector import DB_PATH
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -18,7 +19,7 @@ DASHBOARD = BASE_DIR / "unified_dashboard.html"
 CLASSIC_INDEX = ROOT_DIR / "index.html"
 UPDATE_SCRIPT = BASE_DIR / "remote_update.cmd"
 UPDATE_LAUNCHER = BASE_DIR / "remote_update.vbs"
-UI_VERSION = "0.9.2"
+UI_VERSION = "0.9.3"
 _UPDATE = {"running": False, "requestedAt": None, "lastError": None}
 _UPDATE_LOCK = threading.Lock()
 
@@ -28,9 +29,25 @@ def _remote_allowed(request: Request):
     return host in ("127.0.0.1", "::1") or host.startswith("100.")
 
 
+def _has_open_positions():
+    """Read-only safety check; avoids init_paper_db/PRAGMA WAL during live trading."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=2)
+        try:
+            row = conn.execute("SELECT 1 FROM paper_trades WHERE status='OPEN' LIMIT 1").fetchone()
+            return bool(row), None
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        text = str(exc).lower()
+        if "no such table" in text:
+            return False, None
+        return None, f"Paper DB 확인 실패: {exc}"
+    except Exception as exc:
+        return None, f"Paper DB 확인 실패: {type(exc).__name__}: {exc}"
+
+
 def _launch_update_after_response():
-    # Important: give FastAPI/Uvicorn enough time to flush the HTTP success
-    # response to the phone before the updater kills/restarts the server.
     time.sleep(2.0)
     try:
         subprocess.Popen(
@@ -77,26 +94,35 @@ async def update_status(request: Request):
 
 async def update_run(request: Request):
     if not _remote_allowed(request):
-        raise HTTPException(status_code=403, detail="Update is allowed only from localhost or Tailscale.")
-    if open_positions():
+        raise HTTPException(status_code=403, detail="업데이트는 localhost 또는 Tailscale 접속에서만 허용됩니다.")
+
+    has_open, db_error = _has_open_positions()
+    if db_error:
+        raise HTTPException(status_code=409, detail=db_error + " · 안전을 위해 업데이트를 보류합니다.")
+    if has_open:
         raise HTTPException(status_code=409, detail="열린 Paper 포지션이 있어 업데이트를 차단했습니다.")
     if _UPDATE.get("running"):
         raise HTTPException(status_code=409, detail="업데이트가 이미 진행 중입니다.")
-    if not UPDATE_SCRIPT.exists() or not UPDATE_LAUNCHER.exists():
-        raise HTTPException(status_code=500, detail="원격 업데이트 실행 파일이 없습니다.")
+    if not UPDATE_SCRIPT.exists():
+        raise HTTPException(status_code=409, detail="remote_update.cmd가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요.")
+    if not UPDATE_LAUNCHER.exists():
+        raise HTTPException(status_code=409, detail="remote_update.vbs가 없습니다. 노트북에서 통합 업데이트를 한 번 실행하세요.")
 
-    with _UPDATE_LOCK:
-        _UPDATE.update({"running": True, "requestedAt": datetime.now().isoformat(), "lastError": None})
+    try:
+        with _UPDATE_LOCK:
+            _UPDATE.update({"running": True, "requestedAt": datetime.now().isoformat(), "lastError": None})
+        threading.Thread(target=_launch_update_after_response, daemon=True, name="remote-update-launcher").start()
+    except Exception as exc:
+        msg = f"{type(exc).__name__}: {exc}"
+        with _UPDATE_LOCK:
+            _UPDATE.update({"running": False, "lastError": msg})
+        raise HTTPException(status_code=409, detail="업데이트 예약 실패: " + msg)
 
-    # Do NOT launch the updater inline. The updater intentionally terminates
-    # Uvicorn; launching it here can cut the HTTP response mid-flight and the
-    # Android browser then reports a misleading HTTP 500 even though update ran.
-    threading.Thread(target=_launch_update_after_response, daemon=True, name="remote-update-launcher").start()
     return {
         "ok": True,
         "accepted": True,
         "uiVersion": UI_VERSION,
-        "message": "업데이트 요청을 접수했습니다. 약 2초 후 서버가 재시작됩니다.",
+        "message": "업데이트 요청 접수 완료. 약 2초 후 서버 재시작을 시작합니다.",
     }
 
 
