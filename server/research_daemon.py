@@ -30,11 +30,11 @@ def _snapshot_universe():
  except Exception as e:return {'ok':False,'error':f'{type(e).__name__}: {e}','todayCodes':len(codes)}
 
 def _summary(m,s,p,hs,us):
- f=m.get('failureAnalysis',{});rg=m.get('marketRegime',{}).get('groups',{});su=m.get('surgeDiscovery',{});pb=p.get('best') or {};rd=p.get('readiness') or {};full=pb.get('full') or {};oos=pb.get('oos') or {};stress=pb.get('stress2xSlippage') or {};late=pb.get('oneBarLate') or {}
+ f=m.get('failureAnalysis',{});mr=m.get('marketRegime',{});rg=mr.get('groups',{});su=m.get('surgeDiscovery',{});pb=p.get('best') or {};rd=p.get('readiness') or {};full=pb.get('full') or {};oos=pb.get('oos') or {};stress=pb.get('stress2xSlippage') or {};late=pb.get('oneBarLate') or {}
  lines=[]
  lines.append(f"자동 데이터 축적: 최근 {hs.get('requestedDays',_STATE['historyDays'])}거래일 × 최대 {hs.get('requestedCodes',_STATE['historyCodes'])}종목을 점검합니다. 이번 수집 새/갱신 5분봉 {hs.get('writtenBars',0):,}개, 캐시/건너뜀 {hs.get('skippedBars',0):,}개입니다. 과거 시점의 종목선택 편향을 줄이기 위한 Universe Snapshot은 {us.get('snapshotDays',0)}일/{us.get('snapshotRows',0)}행 축적 중입니다.")
  if pb:
-  lines.append(f"수익성 연구 선두는 {pb.get('strategy')} + {pb.get('exit')}입니다. 전체 {full.get('trades',0)}건, 승률 {_fmt(full.get('winRate'))}%, PF {_fmt(full.get('profitFactor'))}, 기대값 {_fmt(full.get('expectancyPct'),3)}%, MDD {_fmt(full.get('maxDrawdownPct'))}%입니다.")
+  lines.append(f"수익성 연구 선두는 {pb.get('strategy')} + {pb.get('exit')}이며 시장조건은 '{pb.get('marketMode')}', 급등 사전선별은 '{pb.get('surgeMode')}'입니다. 전체 {full.get('trades',0)}건, 승률 {_fmt(full.get('winRate'))}%, PF {_fmt(full.get('profitFactor'))}, 기대값 {_fmt(full.get('expectancyPct'),3)}%, MDD {_fmt(full.get('maxDrawdownPct'))}%입니다.")
   lines.append(f"기간외(OOS) 검증은 {oos.get('trades',0)}건, PF {_fmt(oos.get('profitFactor'))}, 기대값 {_fmt(oos.get('expectancyPct'),3)}%입니다. 2배 슬리피지 스트레스는 PF {_fmt(stress.get('profitFactor'))}/기대값 {_fmt(stress.get('expectancyPct'),3)}%, 1봉 늦은 체결은 PF {_fmt(late.get('profitFactor'))}/기대값 {_fmt(late.get('expectancyPct'),3)}%입니다.")
   lines.append(f"실전 준비도는 {rd.get('score',0)}/100입니다. 승격 게이트: {rd.get('gate','표본/OOS/비용 스트레스 검증 필요')}.")
  flags=f.get('lossFlags',{});top=sorted(flags.items(),key=lambda kv:kv[1],reverse=True)[:3]
@@ -44,8 +44,8 @@ def _summary(m,s,p,hs,us):
   for k in ('NORMAL','CAUTION','RED'):
    x=rg.get(k,{})
    txt.append(f"{k} PF {_fmt(x.get('profitFactor'))}/기대값 {_fmt(x.get('expectancyPct'),3)}%")
-  lines.append('시장상태별 결과는 '+', '.join(txt)+'입니다. 현재는 breadth proxy이므로 RED 장세를 곧바로 실전 전면금지 규칙으로 승격하지 않고, 실제 지수 데이터 연결 전까지 Shadow 근거로만 사용합니다.')
- lines.append(f"Early Surge는 실제 급등 {su.get('actualSurges',0)}건, 사전후보 {su.get('candidates',0)}건, 적중 {su.get('hits',0)}건입니다. 장초 09:00~09:30 데이터와 Universe Snapshot이 쌓일수록 사전선별 성능을 자동 재평가합니다.")
+  lines.append('시장상태별 결과는 '+', '.join(txt)+f"입니다. 현재 방식은 {mr.get('method','BREADTH_PROXY')}이며 KODEX200/KODEX KOSDAQ150과 breadth를 결합한 보조 시장지표입니다. 실제 지수 자체가 아니므로 실전 차단 규칙으로 자동 승격하지 않습니다.")
+ lines.append(f"Early Surge는 {m.get('codesTested',0)}종목 범위에서 실제 급등 {su.get('actualSurges',0)}건, 사전후보 {su.get('candidates',0)}건, 적중 {su.get('hits',0)}건입니다. Profitability Lab의 Early Surge 특징 커버리지는 {p.get('surgeFeatureCoverage',0)}%이며 장초 데이터와 Universe Snapshot이 쌓일수록 자동 재평가합니다.")
  verdict='연구 게이트 1차 통과 — NH 모의주문/추가 기간외 검증 단계로 이동 가능' if rd.get('pass') else '아직 실전 승격 금지'
  lines.append(f"최종판정: {verdict}. Control v0.8.0 LOCKED · 자동 전략변경 OFF · REAL ORDER OFF.")
  return '\n\n'.join(lines)
@@ -77,9 +77,9 @@ def run_once():
   hs=_accumulate_and_wait() if _STATE['historyAuto'] else history_status()
   _STATE['phase']='universe-snapshot';us=_snapshot_universe()
   _STATE['phase']='strategy-backtest';s=run_lab(40)
-  _STATE['phase']='market-failure-surge';m=run_market_lab(40)
+  _STATE['phase']='market-failure-surge';m=run_market_lab(80)
   _STATE['phase']='profitability-oos-stress';p=run_profitability_lab(40)
-  data={'ok':True,'generatedAt':datetime.now().isoformat(timespec='seconds'),'summary':_summary(m,s,p,hs,us),'history':hs,'universeSnapshot':us,'market':m,'strategy':s,'profitability':p,'pipeline':['historical-5m','universe-snapshot','strategy-backtest','failure-analysis','market-regime','early-surge','exit-optimization','cross-v2.1-challengers','chronological-oos','slippage-stress','late-fill-stress','readiness-score','final-summary'],'safety':{'control':'v0.8.0 LOCKED','liveMutation':False,'realOrder':False}}
+  data={'ok':True,'generatedAt':datetime.now().isoformat(timespec='seconds'),'summary':_summary(m,s,p,hs,us),'history':hs,'universeSnapshot':us,'market':m,'strategy':s,'profitability':p,'pipeline':['historical-5m','market-etf-proxies','universe-snapshot','strategy-backtest','failure-analysis','market-regime','early-surge','exit-optimization','cross-v2.1-challengers','regime-gate-research','surge-selection-research','chronological-oos','slippage-stress','late-fill-stress','readiness-score','final-summary'],'safety':{'control':'v0.8.0 LOCKED','liveMutation':False,'realOrder':False}}
   OUT.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8');_STATE.update({'lastRun':data['generatedAt'],'lastError':None,'phase':'idle'});return data
  except Exception as e:
   _STATE.update({'lastError':f'{type(e).__name__}: {e}','phase':'error'});return {'ok':False,'error':_STATE['lastError']}
