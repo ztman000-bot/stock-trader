@@ -7,7 +7,7 @@ from starlette.routing import Route,Mount
 from starlette.staticfiles import StaticFiles
 from app import app
 from collector import DB_PATH
-BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UPDATE_LAUNCHER=BASE_DIR/'remote_update.vbs';UI_VERSION='0.13.0';_UPDATE={'running':False,'requestedAt':None,'lastError':None};_UPDATE_LOCK=threading.Lock()
+BASE_DIR=Path(__file__).resolve().parent;ROOT_DIR=BASE_DIR.parent;DASHBOARD=BASE_DIR/'unified_dashboard.html';CLASSIC_INDEX=ROOT_DIR/'index.html';UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd';UPDATE_LAUNCHER=BASE_DIR/'remote_update.vbs';UI_VERSION='0.14.0';_UPDATE={'running':False,'requestedAt':None,'lastError':None};_UPDATE_LOCK=threading.Lock()
 def _remote_allowed(request):
  host=(request.client.host if request.client else '') or '';return host in ('127.0.0.1','::1') or host.startswith('100.')
 def _has_open_positions():
@@ -35,7 +35,7 @@ async def update_run(request):
  threading.Thread(target=_launch_update_after_response,daemon=True).start();return JSONResponse({'ok':True,'accepted':True,'uiVersion':UI_VERSION,'message':'업데이트 요청 접수 완료.'})
 async def update_status(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,**_UPDATE})
 async def ui_health(request):
- checks={'index':CLASSIC_INDEX.is_file(),'css':(ROOT_DIR/'styles.css').is_file(),'liveJs':(ROOT_DIR/'js'/'live-app.js').is_file()};return JSONResponse({'ok':all(checks.values()),'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'checks':checks},status_code=200 if all(checks.values()) else 503)
+ checks={'index':CLASSIC_INDEX.is_file(),'css':(ROOT_DIR/'styles.css').is_file(),'liveJs':(ROOT_DIR/'js'/'live-app.js').is_file()};return JSONResponse({'ok':all(checks.values()),'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'validation':{'mfeMae':True,'entrySnapshots':True,'scoreBuckets':True,'profitFactor':True,'expectancy':True,'mdd':True,'failureClassification':True,'controlStrategy':'v0.8.0'},'checks':checks},status_code=200 if all(checks.values()) else 503)
 def _ensure_route(path,endpoint,methods=None,name=None):
  if not any(getattr(r,'path',None)==path for r in app.router.routes):app.router.routes.append(Route(path,endpoint=endpoint,methods=methods or ['GET'],name=name))
 _ensure_route('/api/system/update/run',update_run,['POST']);_ensure_route('/api/system/update/status',update_status);_ensure_route('/api/system/ui-health',ui_health)
