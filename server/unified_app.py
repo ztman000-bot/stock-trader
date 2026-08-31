@@ -13,7 +13,7 @@ ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.15.5'
+UI_VERSION='0.15.6'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -62,7 +62,7 @@ def update_request(request):
     return JSONResponse({'ok':True,'message':'업데이트를 시작했습니다. 서버 재시작 후 자동으로 새 버전을 확인합니다.','target':'latest-main'})
 
 def update_status(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'update':dict(_UPDATE)})
-def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'validation':{'mfeMae':True,'entrySnapshots':True,'scoreBuckets':True,'profitFactor':True,'expectancy':True,'mdd':True,'failureClassification':True,'controlStrategy':'v0.8.0'},'backtest':{'enabled':True,'ui':True,'controlStrategy':'v0.8.0 LOCKED','costsIncluded':True,'liveMutation':False,'sampleWarningBelow':200},'usMarket':{'collector':True,'paper':False,'realOrder':False},'updater':{'launcher':'cmd-direct','wscriptRequired':False,'openPositionGuard':True,'dirtyTreeGuard':True}})
+def ui_health(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'scannerPolicy':{'safeUniverse':180,'activeFocus':40,'top':10},'validation':{'mfeMae':True,'entrySnapshots':True,'scoreBuckets':True,'profitFactor':True,'expectancy':True,'mdd':True,'failureClassification':True,'controlStrategy':'v0.8.0'},'backtest':{'enabled':True,'ui':True,'controlStrategy':'v0.8.0 LOCKED','costsIncluded':True,'liveMutation':False,'sampleWarningBelow':200},'usMarket':{'collector':True,'paper':False,'realOrder':False},'updater':{'launcher':'cmd-direct','wscriptRequired':False,'openPositionGuard':True,'dirtyTreeGuard':True,'compatRoute':True}})
 def root(request):return RedirectResponse('/classic')
 def classic(request):return FileResponse(CLASSIC_INDEX,headers={'Cache-Control':'no-store, max-age=0'})
 def dashboard(request):return FileResponse(DASHBOARD,headers={'Cache-Control':'no-store, max-age=0'})
@@ -70,4 +70,4 @@ def static_file(request):
     p=ROOT_DIR/request.url.path.lstrip('/')
     if not p.exists() or not p.is_file():return JSONResponse({'error':'not found'},404)
     return FileResponse(p,headers={'Cache-Control':'no-store, max-age=0'})
-app.router.routes.extend([Route('/',root),Route('/classic',classic),Route('/dashboard',dashboard),Route('/api/system/update',update_request,methods=['POST']),Route('/api/system/update/status',update_status),Route('/api/system/ui-health',ui_health),Route('/styles.css',static_file),Route('/manifest.webmanifest',static_file),Route('/sw.js',static_file),Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')])
+app.router.routes.extend([Route('/',root),Route('/classic',classic),Route('/dashboard',dashboard),Route('/api/system/update',update_request,methods=['POST']),Route('/api/system/update/run',update_request,methods=['POST']),Route('/api/system/update/status',update_status),Route('/api/system/ui-health',ui_health),Route('/styles.css',static_file),Route('/manifest.webmanifest',static_file),Route('/sw.js',static_file),Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')])
