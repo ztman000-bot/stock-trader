@@ -15,13 +15,14 @@ from benchmark_lab import run_benchmark_lab
 from data_quality import audit as data_quality_audit
 from stocks_in_play import scan as stocks_in_play_scan,start_recorder as stocks_recorder_start,snapshot_stats as stocks_snapshot_stats
 from research_daemon import start as research_start,latest as research_latest,status as research_status
+from us_research import start as us_research_start,research_status as us_research_status,latest_us_research
 
 BASE_DIR=Path(__file__).resolve().parent
 ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.3'
+UI_VERSION='0.17.4'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -102,6 +103,10 @@ def stocks_lab(request):
     try:return JSONResponse({'scan':stocks_in_play_scan(int(request.query_params.get('limit','40'))),'snapshots':stocks_snapshot_stats()})
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Stocks-in-Play 오류: {type(exc).__name__}: {exc}'},500)
 
+def us_research_state(request):
+    try:return JSONResponse({'ok':True,'status':us_research_status(),'latest':latest_us_research(int(request.query_params.get('limit','20')))})
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'US Research 오류: {type(exc).__name__}: {exc}'},500)
+
 def runtime_health(request):
     rows=latest_quotes(getattr(collector,'watchlist',[]) or None);ages=[];now=datetime.now().astimezone()
     for q in rows:
@@ -119,7 +124,7 @@ def runtime_health(request):
     },200 if ok else 503)
 
 def final_research(request):return JSONResponse(research_latest())
-def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status()})
+def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'usResearch':us_research_status()})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 
 def history_start(request):
@@ -128,13 +133,13 @@ def history_start(request):
         return JSONResponse(result,200 if result.get('ok') else 409)
     except Exception as exc:return JSONResponse({'ok':False,'error':str(exc)},500)
 
-def history_stop(request):return JSONResponse(history_stop_job())
+def history_stop(request):return history_stop_job()
 
 def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.3','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.4','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'profitabilityLab':True,'exitIntelligenceV2':True,'pullbackEntry':True,
@@ -148,7 +153,12 @@ def ui_health(request):
             'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY','benchmarkSameCostModel':True,'liveMutation':False
         },
         'security':{'localhostBindExpected':True,'tailscaleProxyExpected':True},
-        'usMarket':{'collector':True,'paper':False,'realOrder':False}
+        'usMarket':{
+            'collector':True,'researchCollector':True,'oneMinuteBars':True,'fiveMinuteBars':True,
+            'pointInTimeStocksInPlay':True,'timeOfDayRvol':True,'gapTracking':True,
+            'marketProxies':['SPY','QQQ','IWM'],'krUsStatsSeparate':True,
+            'paper':False,'realOrder':False
+        }
     })
 
 def root(request):return RedirectResponse('/classic')
@@ -176,6 +186,7 @@ app.router.routes.extend([
     Route('/api/research/stocks-in-play',stocks_lab),
     Route('/api/research/final',final_research),
     Route('/api/research/status',research_state),
+    Route('/api/us/research/status',us_research_state),
     Route('/api/history/status',history_status),
     Route('/api/history/start',history_start,methods=['POST']),
     Route('/api/history/stop',history_stop,methods=['POST']),
@@ -185,4 +196,5 @@ app.router.routes.extend([
 ])
 
 stocks_recorder_start()
+us_research_start()
 research_start()
