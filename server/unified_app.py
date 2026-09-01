@@ -11,6 +11,7 @@ from strategy_lab import run_lab,run_exit_lab
 from market_lab import run_market_lab
 from profitability_lab import run_profitability_lab
 from robust_validation import run_robust_validation
+from benchmark_lab import run_benchmark_lab
 from data_quality import audit as data_quality_audit
 from stocks_in_play import scan as stocks_in_play_scan,start_recorder as stocks_recorder_start,snapshot_stats as stocks_snapshot_stats
 from research_daemon import start as research_start,latest as research_latest,status as research_status
@@ -20,7 +21,7 @@ ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.2'
+UI_VERSION='0.17.3'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -89,6 +90,10 @@ def robust_lab(request):
     try:return JSONResponse(run_robust_validation(int(request.query_params.get('max_codes','40'))))
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Robust Validation 오류: {type(exc).__name__}: {exc}'},500)
 
+def benchmark_lab(request):
+    try:return JSONResponse(run_benchmark_lab(int(request.query_params.get('max_codes','40'))))
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'Public Benchmark 오류: {type(exc).__name__}: {exc}'},500)
+
 def quality_lab(request):
     try:return JSONResponse(data_quality_audit())
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Data Quality 오류: {type(exc).__name__}: {exc}'},500)
@@ -129,17 +134,18 @@ def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.2','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.3','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'profitabilityLab':True,'exitIntelligenceV2':True,'pullbackEntry':True,
             'payoffTracking':True,'goodDataGate':True,'walkForward':True,'finalLockbox':True,
+            'publicStrategyBenchmark':True,'publicOrbBenchmark':True,'fixedStrategyComparison':True,
             'dataQualityAudit':True,'oneMinuteExitGate':True,'automaticResearch':True,
             'liveSessionResearchDefer':True,'overnightLab':True,'liveMutation':False
         },
         'backtest':{
             'enabled':True,'engine':'precise-portfolio-v1','executionModel':'next-bar-open',
-            'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY','liveMutation':False
+            'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY','benchmarkSameCostModel':True,'liveMutation':False
         },
         'security':{'localhostBindExpected':True,'tailscaleProxyExpected':True},
         'usMarket':{'collector':True,'paper':False,'realOrder':False}
@@ -165,6 +171,7 @@ app.router.routes.extend([
     Route('/api/research/market-lab',market_lab),
     Route('/api/research/profitability',profitability_lab),
     Route('/api/research/robust',robust_lab),
+    Route('/api/research/benchmark',benchmark_lab),
     Route('/api/research/data-quality',quality_lab),
     Route('/api/research/stocks-in-play',stocks_lab),
     Route('/api/research/final',final_research),
