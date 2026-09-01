@@ -25,7 +25,8 @@ def _wait_for_research_window():
  return not _STOP.is_set()
 def _download_day(code,day):
  existing=_existing_count(code,day)
- if existing>=70:return {'cached':True,'written':0,'skipped':existing,'received':existing}
+ # GOOD-data research requires at least 76 usable 5m bars. Partial 70~75 bar days are re-fetched.
+ if existing>=76:return {'cached':True,'written':0,'skipped':existing,'received':existing}
  if not _wait_for_research_window():return {'cached':False,'written':0,'skipped':0,'received':0}
  payload=nh_call('/krstock/quote/v1/period',{'market_cd':'KRX','iem_cd':code,'edate':day.strftime('%Y%m%d'),'array_cnt':'120','gubun':'5','xtick':'5','today_cls_code':'1' if day==datetime.now(KST).date() else '0','fake_tick':'1'});rows=_period_rows(payload);written=skipped=0
  with sqlite3.connect(DB_PATH,timeout=10) as c:
@@ -69,4 +70,4 @@ def start(days=20,max_codes=40):
 def stop():_STOP.set();return {'ok':True,'message':'중지 요청됨','status':status()}
 def status():
  with _LOCK:s=dict(STATUS)
- total=max(1,int(s.get('totalJobs') or 0));s['progressPct']=round(int(s.get('completedJobs') or 0)/total*100,1) if s.get('totalJobs') else 0;s['regimeProxyCodes']=list(REGIME_PROXY_CODES);s['liveSessionPriority']=True;return s
+ total=max(1,int(s.get('totalJobs') or 0));s['progressPct']=round(int(s.get('completedJobs') or 0)/total*100,1) if s.get('totalJobs') else 0;s['regimeProxyCodes']=list(REGIME_PROXY_CODES);s['liveSessionPriority']=True;s['cacheMinBars']=76;return s
