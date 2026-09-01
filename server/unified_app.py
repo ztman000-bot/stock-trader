@@ -16,13 +16,14 @@ from data_quality import audit as data_quality_audit
 from stocks_in_play import scan as stocks_in_play_scan,start_recorder as stocks_recorder_start,snapshot_stats as stocks_snapshot_stats
 from research_daemon import start as research_start,latest as research_latest,status as research_status
 from us_research import start as us_research_start,research_status as us_research_status,latest_us_research
+from kr_1m_research import start as kr_1m_start,research_status as kr_1m_status,coverage as kr_1m_coverage
 
 BASE_DIR=Path(__file__).resolve().parent
 ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.4'
+UI_VERSION='0.17.5'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -107,6 +108,10 @@ def us_research_state(request):
     try:return JSONResponse({'ok':True,'status':us_research_status(),'latest':latest_us_research(int(request.query_params.get('limit','20')))})
     except Exception as exc:return JSONResponse({'ok':False,'error':f'US Research 오류: {type(exc).__name__}: {exc}'},500)
 
+def kr_1m_research_state(request):
+    try:return JSONResponse({'ok':True,'status':kr_1m_status(),'coverage':kr_1m_coverage()})
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'KR 1분봉 Research 오류: {type(exc).__name__}: {exc}'},500)
+
 def runtime_health(request):
     rows=latest_quotes(getattr(collector,'watchlist',[]) or None);ages=[];now=datetime.now().astimezone()
     for q in rows:
@@ -120,11 +125,12 @@ def runtime_health(request):
         'maxQuoteAgeSec':round(max_age,1) if max_age is not None else None,
         'quotesFresh':fresh,'historyPausedForLive':bool(hs.get('pausedForLive')),
         'historyLivePriority':bool(hs.get('liveSessionPriority')),
+        'krOneMinuteResearch':kr_1m_status(),
         'newEntriesAllowedByRuntime':ok,'realOrderEnabled':False
     },200 if ok else 503)
 
 def final_research(request):return JSONResponse(research_latest())
-def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'usResearch':us_research_status()})
+def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'krOneMinute':kr_1m_status(),'usResearch':us_research_status()})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 
 def history_start(request):
@@ -139,7 +145,7 @@ def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.4','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.5','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'profitabilityLab':True,'exitIntelligenceV2':True,'pullbackEntry':True,
@@ -150,9 +156,16 @@ def ui_health(request):
         },
         'backtest':{
             'enabled':True,'engine':'precise-portfolio-v1','executionModel':'next-bar-open',
-            'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY','benchmarkSameCostModel':True,'liveMutation':False
+            'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY',
+            'krOneMinuteDataCollector':True,'oneMinuteExitReplayConnected':False,
+            'benchmarkSameCostModel':True,'liveMutation':False
         },
         'security':{'localhostBindExpected':True,'tailscaleProxyExpected':True},
+        'krMarket':{
+            'oneMinuteResearchCollector':True,'liveTransport':'NH WebSocket oc',
+            'historicalTransport':'NH REST period gubun=5 xtick=1','liveFocusMax':10,
+            'sharedRestThrottle':True,'realOrder':False
+        },
         'usMarket':{
             'collector':True,'researchCollector':True,'oneMinuteBars':True,'fiveMinuteBars':True,
             'pointInTimeStocksInPlay':True,'timeOfDayRvol':True,'gapTracking':True,
@@ -186,6 +199,7 @@ app.router.routes.extend([
     Route('/api/research/stocks-in-play',stocks_lab),
     Route('/api/research/final',final_research),
     Route('/api/research/status',research_state),
+    Route('/api/kr/research/1m/status',kr_1m_research_state),
     Route('/api/us/research/status',us_research_state),
     Route('/api/history/status',history_status),
     Route('/api/history/start',history_start,methods=['POST']),
@@ -196,5 +210,6 @@ app.router.routes.extend([
 ])
 
 stocks_recorder_start()
+kr_1m_start()
 us_research_start()
 research_start()
