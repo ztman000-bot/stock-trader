@@ -1,8 +1,9 @@
-"""Market Research Lab v0.17.0. Research only; never changes live rules or sends orders."""
+"""Market Research Lab v0.17.7. Research only; never changes live rules or sends orders."""
 from collections import defaultdict
 from statistics import mean, median
 from backtest_engine import _load_rows,_dt,available_codes,_ema,_rsi,_wilder_adx,_vwap
 from strategy_lab import _signals,_exit_trade
+from market_state_engine import classify_market_state
 
 SURGE_PCT=5.0
 REGIME_PROXY_CODES={'069500':'KODEX200','229200':'KODEX_KOSDAQ150'}
@@ -69,15 +70,9 @@ def _build_regime(codes):
  for b,vals in by.items():
   if len(vals)<10:continue
   breadth=sum(v>0 for v in vals)/len(vals);med=median(vals);pvals=proxy.get(b,[]);pret=median(pvals) if pvals else None
-  if pret is not None:
-   if (pret<-1.0) or (pret<-.70 and breadth<.40):label='RED'
-   elif pret<-.30 or breadth<.45 or med<-.25:label='CAUTION'
-   else:label='NORMAL'
-  else:
-   if breadth<.35 and med<-.50:label='RED'
-   elif breadth<.45 or med<-.25:label='CAUTION'
-   else:label='NORMAL'
-  out[b]={'label':label,'breadth':breadth,'medianRetPct':med,'proxyRetPct':pret,'n':len(vals)}
+  state=classify_market_state(pret,breadth,med)
+  out[b]={'label':state['label'],'breadth':breadth,'medianRetPct':med,'proxyRetPct':pret,'n':len(vals),
+          'confidence':state['confidence'],'reasons':state['reasons'],'ruleVersion':state['ruleVersion']}
  return out
 
 def _regime_test(codes):
@@ -93,7 +88,10 @@ def _regime_test(codes):
   w=[x for x in a if x>0];l=[x for x in a if x<=0];gp=sum(w);gl=abs(sum(l));pf=gp/gl if gl else (999 if gp else 0)
   return {'trades':len(a),'winRate':_f(len(w)/len(a)*100,2) if a else 0,'profitFactor':_f(pf,3),'expectancyPct':_f(mean(a),3) if a else 0}
  proxy_buckets=sum(1 for x in regime.values() if x.get('proxyRetPct') is not None);_,coverage=_proxy_returns();method='ETF_INDEX_PROXY+BREADTH' if proxy_buckets else 'BREADTH_PROXY'
- return {'method':method,'proxyCodes':REGIME_PROXY_CODES,'proxyCoverage':coverage,'proxyBuckets':proxy_buckets,'thresholds':{'red':'ETF proxy <-1.0% OR proxy <-0.70% + breadth <40%','caution':'proxy <-0.30% OR breadth <45% OR median intraday return <-0.25%'},'groups':{k:met(v) for k,v in buckets.items()},'warning':'KODEX200/KODEX KOSDAQ150 5분봉을 KOSPI/KOSDAQ 방향 보조 proxy로 사용합니다. 실제 지수 자체가 아니므로 Control 실전 게이트로 자동 승격하지 않습니다.'}
+ return {'method':method,'proxyCodes':REGIME_PROXY_CODES,'proxyCoverage':coverage,'proxyBuckets':proxy_buckets,
+         'thresholds':{'red':'ETF proxy <-1.0% OR proxy <-0.70% + breadth <40%','caution':'proxy <-0.30% OR breadth <45% OR median intraday return <-0.25%'},
+         'groups':{k:met(v) for k,v in buckets.items()},'ruleVersion':'market-state-v1',
+         'warning':'KODEX200/KODEX KOSDAQ150 5분봉을 KOSPI/KOSDAQ 방향 보조 proxy로 사용합니다. 실제 지수 자체가 아니므로 Control 실전 게이트로 자동 승격하지 않습니다.'}
 
 def _surge_lab(codes):
  rows_out=[]
@@ -121,4 +119,4 @@ def _surge_lab(codes):
 
 def run_market_lab(max_codes=40):
  codes=[x['code'] for x in available_codes()[:max(10,min(int(max_codes),100))]]
- return {'ok':True,'labVersion':'0.17.0','controlStrategy':'v0.8.0 LOCKED','researchOnly':True,'liveRuleAutoMutation':False,'realOrderEnabled':False,'codesTested':len(codes),'failureAnalysis':_failure_analysis(codes),'marketRegime':_regime_test(codes),'surgeDiscovery':_surge_lab(codes),'recommendation':'ETF 시장 proxy + breadth, RED 회피, Early Surge 사전선별을 Shadow 검증합니다. OOS/비용 스트레스에서 재현되기 전 Control에는 반영하지 않습니다.'}
+ return {'ok':True,'labVersion':'0.17.7','controlStrategy':'v0.8.0 LOCKED','researchOnly':True,'liveRuleAutoMutation':False,'realOrderEnabled':False,'codesTested':len(codes),'failureAnalysis':_failure_analysis(codes),'marketRegime':_regime_test(codes),'surgeDiscovery':_surge_lab(codes),'recommendation':'기존 시장상태 규칙을 shared engine으로 통합했습니다. Threshold와 Control 동작은 바꾸지 않았으며 OOS/비용 스트레스 전에는 실전 반영하지 않습니다.'}
