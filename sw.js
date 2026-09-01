@@ -1,5 +1,5 @@
-const CACHE='stock-day-trader-live-v175-kr1m';
-const ASSETS=['/classic','/styles.css?v=175','/js/app-safe.js?v=175','/js/history-ui.js?v=175','/js/strategy-lab-ui.js?v=175','/js/market-lab-ui.js?v=175','/js/final-results-ui.js?v=175','/js/trade-name-fix.js?v=175','/manifest.webmanifest?v=175','/icons/icon-192.svg','/icons/icon-512.svg'];
+const CACHE='stock-day-trader-live-v176-scanner-intel';
+const ASSETS=['/classic','/styles.css?v=176','/js/app-safe.js?v=176','/js/history-ui.js?v=176','/js/strategy-lab-ui.js?v=176','/js/market-lab-ui.js?v=176','/js/final-results-ui.js?v=176','/js/trade-name-fix.js?v=176','/manifest.webmanifest?v=176','/icons/icon-192.svg','/icons/icon-512.svg'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS).catch(()=>{})))});
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=new URL(e.request.url);if(u.pathname.startsWith('/api/')){e.respondWith(fetch(e.request,{cache:'no-store'}));return}e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{if(r.ok){const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/classic'))))});
