@@ -133,7 +133,7 @@ def history_start(request):
         return JSONResponse(result,200 if result.get('ok') else 409)
     except Exception as exc:return JSONResponse({'ok':False,'error':str(exc)},500)
 
-def history_stop(request):return history_stop_job()
+def history_stop(request):return JSONResponse(history_stop_job())
 
 def ui_health(request):
     return JSONResponse({
