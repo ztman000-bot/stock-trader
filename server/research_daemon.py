@@ -1,5 +1,6 @@
-"""Automatic research pipeline v0.17.2.
-GOOD-data PF research + Stocks-in-Play + Exit Intelligence + Pullback Entry + robust validation.
+"""Automatic research pipeline v0.17.3.
+GOOD-data PF research + Stocks-in-Play + Exit Intelligence + Pullback Entry +
+Public Strategy Benchmark + robust validation.
 Research/data only. Never mutates Control/live rules and never sends orders.
 """
 import json,sqlite3,threading,time
@@ -9,6 +10,7 @@ from market_lab import run_market_lab
 from strategy_lab import run_lab
 from profitability_lab import run_profitability_lab
 from robust_validation import run_robust_validation
+from benchmark_lab import run_benchmark_lab
 from data_quality import audit as data_quality_audit
 from stocks_in_play import scan as stocks_in_play_scan,snapshot_stats as stocks_snapshot_stats
 from historical_accumulator import start as history_start,status as history_status
@@ -20,7 +22,8 @@ _STATE={
     'running':False,'lastRun':None,'lastError':None,'intervalMin':60,
     'historyAuto':True,'historyDays':60,'historyCodes':40,'historyMinIntervalMin':180,
     'lastHistoryStart':None,'phase':'idle','liveSessionPriority':True,
-    'goodDataGate':True,'stocksInPlayResearch':True,'exitIntelligenceV2':True,'pullbackEntryResearch':True
+    'goodDataGate':True,'stocksInPlayResearch':True,'exitIntelligenceV2':True,
+    'pullbackEntryResearch':True,'publicBenchmarkLab':True
 }
 
 def _fmt(x,d=2):
@@ -40,7 +43,19 @@ def _snapshot_universe():
     except Exception as e:
         return {'ok':False,'error':f'{type(e).__name__}: {e}','todayCodes':len(codes)}
 
-def _summary(p,r,q,hs,us,sip,ss):
+def _benchmark_summary(bm):
+    rows=bm.get('benchmarks') or []
+    if not rows:return '공개전략 벤치마크: 비교 가능한 GOOD 데이터가 아직 부족합니다.'
+    parts=[]
+    for x in rows:
+        full=x.get('full') or {};lock=x.get('lockbox') or {};stress=x.get('lockboxStress') or {}
+        parts.append(
+            f"{x.get('name','-')} 전체PF {_fmt(full.get('profitFactor'))} / "
+            f"LockboxPF {_fmt(lock.get('profitFactor'))} / StressPF {_fmt(stress.get('profitFactor'))}"
+        )
+    return '공개전략 동일조건 비교: '+' | '.join(parts)+'. 단순 공개형이 Lockbox/Stress에서 더 좋다면 복잡한 전략 추가효과는 아직 입증되지 않은 것으로 판단합니다.'
+
+def _summary(p,r,q,hs,us,sip,ss,bm):
     b=p.get('best') or {};rd=p.get('readiness') or {};full=b.get('full') or {};oos=b.get('oos') or {};wf=r.get('walkForward') or {};lock=r.get('lockbox') or {};counts=q.get('counts') or {}
     top=(sip.get('rows') or [{}])[0] if sip else {}
     lines=[
@@ -53,6 +68,7 @@ def _summary(p,r,q,hs,us,sip,ss):
             f"전체 {full.get('trades',0)}건 PF {_fmt(full.get('profitFactor'))}, 기대값 {_fmt(full.get('expectancyPct'),3)}%, "
             f"평균익 {_fmt(full.get('avgWinPct'),3)}%/평균손 {_fmt(full.get('avgLossPct'),3)}%, payoff {_fmt(full.get('payoffRatio'),2)}, OOS PF {_fmt(oos.get('profitFactor'))}."
         )
+    lines.append(_benchmark_summary(bm))
     lines.append(
         f"Walk-Forward {wf.get('folds',0)}구간 중 양수 {wf.get('positiveFolds',0)}구간. 개발에 사용하지 않은 Final Lockbox PF {_fmt(lock.get('profitFactor'))}, 기대값 {_fmt(lock.get('expectancyPct'),3)}%."
     )
@@ -104,19 +120,21 @@ def run_once():
         _STATE['phase']='market-research';m=run_market_lab(80)
         _STATE['phase']='pf-entry-exit-research';p=run_profitability_lab(40)
         _STATE['phase']='robust-validation';r=run_robust_validation(40)
+        _STATE['phase']='public-strategy-benchmark';bm=run_benchmark_lab(40,p,r)
         data={
             'ok':True,'generatedAt':datetime.now().isoformat(timespec='seconds'),
-            'summary':_summary(p,r,q,hs,us,sip,ss),'history':hs,'dataQuality':q,
+            'summary':_summary(p,r,q,hs,us,sip,ss,bm),'history':hs,'dataQuality':q,
             'universeSnapshot':us,'stocksInPlay':sip,'stocksInPlaySnapshots':ss,
-            'market':m,'strategy':s,'profitability':p,'robustValidation':r,
+            'market':m,'strategy':s,'profitability':p,'robustValidation':r,'benchmark':bm,
             'pipeline':[
                 'stable-history-snapshot','universe-snapshot','stocks-in-play-point-in-time',
                 'GOOD-data-gate','strategy-backtest','market-research','exit-intelligence-v2',
-                'pullback-entry','payoff-analysis','walk-forward','final-lockbox','cost-fill-stress'
+                'pullback-entry','payoff-analysis','walk-forward','final-lockbox','cost-fill-stress',
+                'public-strategy-benchmark'
             ],
             'safety':{
                 'control':'v0.8.0 LOCKED','liveMutation':False,'realOrder':False,
-                'liveSessionPriority':True,'qualityGate':'GOOD_ONLY'
+                'liveSessionPriority':True,'qualityGate':'GOOD_ONLY','benchmarkAutoPromotion':False
             }
         }
         OUT.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
