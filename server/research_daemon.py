@@ -1,13 +1,13 @@
 """Automatic research pipeline v0.17.3.
 GOOD-data PF research + Stocks-in-Play + Exit Intelligence + Pullback Entry +
-Public Strategy Benchmark + robust validation.
+Public Strategy Benchmark + cached Market/Overnight labs + robust validation.
 Research/data only. Never mutates Control/live rules and never sends orders.
 """
 import json,sqlite3,threading,time
 from datetime import datetime
 from pathlib import Path
 from market_lab import run_market_lab
-from strategy_lab import run_lab
+from strategy_lab import run_lab,run_exit_lab
 from profitability_lab import run_profitability_lab
 from robust_validation import run_robust_validation
 from benchmark_lab import run_benchmark_lab
@@ -23,8 +23,10 @@ _STATE={
     'historyAuto':True,'historyDays':60,'historyCodes':40,'historyMinIntervalMin':180,
     'lastHistoryStart':None,'phase':'idle','liveSessionPriority':True,
     'goodDataGate':True,'stocksInPlayResearch':True,'exitIntelligenceV2':True,
-    'pullbackEntryResearch':True,'publicBenchmarkLab':True
+    'pullbackEntryResearch':True,'publicBenchmarkLab':True,
+    'cachedMarketLab':True,'cachedOvernightLab':True
 }
+OVERNIGHT_STRATEGIES=('cross_trend_v2','cross_trend','orb_cross','orb_rvol')
 
 def _fmt(x,d=2):
     try:return f'{float(x):.{d}f}'
@@ -104,6 +106,12 @@ def _accumulate_and_wait():
         time.sleep(10)
     return history_status()
 
+def _overnight_cache():
+    out={}
+    for strategy in OVERNIGHT_STRATEGIES:
+        out[strategy]=run_exit_lab(strategy)
+    return out
+
 def run_once():
     with _LOCK:
         if _STATE['running']:return {'ok':False,'error':'research already running'}
@@ -118,6 +126,7 @@ def run_once():
         _STATE['phase']='data-quality';q=data_quality_audit()
         _STATE['phase']='strategy-backtest';s=run_lab(40)
         _STATE['phase']='market-research';m=run_market_lab(80)
+        _STATE['phase']='overnight-research';overnight=_overnight_cache()
         _STATE['phase']='pf-entry-exit-research';p=run_profitability_lab(40)
         _STATE['phase']='robust-validation';r=run_robust_validation(40)
         _STATE['phase']='public-strategy-benchmark';bm=run_benchmark_lab(40,p,r)
@@ -125,16 +134,17 @@ def run_once():
             'ok':True,'generatedAt':datetime.now().isoformat(timespec='seconds'),
             'summary':_summary(p,r,q,hs,us,sip,ss,bm),'history':hs,'dataQuality':q,
             'universeSnapshot':us,'stocksInPlay':sip,'stocksInPlaySnapshots':ss,
-            'market':m,'strategy':s,'profitability':p,'robustValidation':r,'benchmark':bm,
+            'market':m,'overnight':overnight,'strategy':s,'profitability':p,'robustValidation':r,'benchmark':bm,
             'pipeline':[
                 'stable-history-snapshot','universe-snapshot','stocks-in-play-point-in-time',
-                'GOOD-data-gate','strategy-backtest','market-research','exit-intelligence-v2',
-                'pullback-entry','payoff-analysis','walk-forward','final-lockbox','cost-fill-stress',
-                'public-strategy-benchmark'
+                'GOOD-data-gate','strategy-backtest','market-research','overnight-research-cache',
+                'exit-intelligence-v2','pullback-entry','payoff-analysis','walk-forward','final-lockbox',
+                'cost-fill-stress','public-strategy-benchmark'
             ],
             'safety':{
                 'control':'v0.8.0 LOCKED','liveMutation':False,'realOrder':False,
-                'liveSessionPriority':True,'qualityGate':'GOOD_ONLY','benchmarkAutoPromotion':False
+                'liveSessionPriority':True,'qualityGate':'GOOD_ONLY','benchmarkAutoPromotion':False,
+                'manualLabHeavyRun':False
             }
         }
         OUT.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
