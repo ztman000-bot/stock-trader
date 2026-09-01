@@ -1,11 +1,18 @@
-"""Robust validation v0.17.2.
-GOOD-only data, walk-forward development folds, untouched final lockbox, and cost/fill stress.
+"""Robust validation v0.17.5.
+GOOD-only data, walk-forward development folds, untouched final lockbox, cost/fill stress,
+and an explicit KR 1-minute data-coverage gate.
 Research only; Control/live rules are never changed.
 """
 from profitability_lab import (
     _candidates,_eval,FILTERS,EXIT_CONFIGS,REGIME_MODES,SURGE_MODES,
     ENTRY_MODES,PLAY_MODES,BASE_SLIPPAGE
 )
+
+try:
+    from kr_1m_research import coverage as kr_1m_coverage
+except Exception:
+    kr_1m_coverage = None
+
 
 def _date_slices(cands,folds=4):
     dates=sorted({x['date'] for x in cands});n=len(dates)
@@ -15,6 +22,39 @@ def _date_slices(cands,folds=4):
         cut=max(3,int(len(dev)*(.45+.10*k)));test_end=min(len(dev),cut+max(1,int(len(dev)*.15)))
         if test_end>cut:chunks.append((set(dev[:cut]),set(dev[cut:test_end])))
     return chunks,lock
+
+
+def _one_minute_status():
+    base={
+        'ready':False,
+        'dataReady':False,
+        'bars':0,
+        'completeDates':0,
+        'completeCodeDays':0,
+        'reason':'KR 1분봉 데이터를 축적 중입니다. 데이터가 충분해져도 실제 1분봉 Exit 재현 엔진을 연결하기 전에는 실전 승격 근거로 사용하지 않습니다.'
+    }
+    if kr_1m_coverage is None:
+        base['reason']='KR 1분봉 수집 모듈을 불러오지 못했습니다. 1분봉 Exit 검증은 미완료 상태로 유지합니다.'
+        return base
+    try:
+        c=kr_1m_coverage() or {}
+        base.update({
+            'dataReady':bool(c.get('dataReady')),
+            'bars':int(c.get('bars') or 0),
+            'completeBars':int(c.get('completeBars') or 0),
+            'days':int(c.get('days') or 0),
+            'completeDates':int(c.get('completeDates') or 0),
+            'completeCodeDays':int(c.get('completeCodeDays') or 0),
+            'partialCodeDays':int(c.get('partialCodeDays') or 0),
+            'dataReadyRule':c.get('dataReadyRule'),
+        })
+        if base['dataReady']:
+            base['reason']='KR 1분봉 데이터 최소 커버리지 게이트는 충족했습니다. 다음 단계인 실제 1분봉 Exit/체결 순서 재현 엔진 검증 전까지 ready=False를 유지합니다.'
+        return base
+    except Exception as exc:
+        base['reason']=f'KR 1분봉 커버리지 확인 실패: {type(exc).__name__}: {exc}'
+        return base
+
 
 def run_robust_validation(max_codes=40):
     cands=_candidates(max(10,min(int(max_codes),100)));folds,lockbox=_date_slices(cands);results=[]
@@ -60,14 +100,11 @@ def run_robust_validation(max_codes=40):
         stress['profitFactor']>=1 and stress['expectancyPct']>=0
     )
     return {
-        'ok':True,'version':'0.17.2','researchOnly':True,'qualityGate':'GOOD_ONLY',
+        'ok':True,'version':'0.17.5','researchOnly':True,'qualityGate':'GOOD_ONLY',
         'candidateTrades':len(cands),'selectedForLockbox':selected,
         'walkForward':{'folds':len(results),'positiveFolds':positive,'results':results},
         'lockbox':lock,'lockboxStress':stress,
-        'oneMinuteExitValidation':{
-            'ready':False,
-            'reason':'현재 저장소는 5분봉 중심입니다. 1분봉 데이터가 축적되기 전에는 실전 승격 근거로 사용하지 않습니다.'
-        },
+        'oneMinuteExitValidation':_one_minute_status(),
         'pass':pass_gate,
         'gate':'GOOD data + walk-forward 반복 양수 + 미사용 final lockbox 양수 + lockbox 2x slippage/1bar-late 방어',
         'liveRuleAutoMutation':False,'realOrderEnabled':False
