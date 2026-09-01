@@ -58,11 +58,9 @@ def _first5_records(code,rows,qmap):
         if 540<=hm<=930:days[dt.date()].append((idx,r))
     out=[];history=[]
     for day,arr in sorted(days.items()):
-        arr=sorted(arr,key=lambda x:x[1]['bucket'])
-        key=(str(code),day.isoformat())
+        arr=sorted(arr,key=lambda x:x[1]['bucket']);key=(str(code),day.isoformat())
         first=next(((idx,r) for idx,r in arr if 540<=(_dt(r['bucket']).hour*60+_dt(r['bucket']).minute)<545),None)
-        if first is None:
-            continue
+        if first is None:continue
         idx,r=first;vol=max(0,int(r['volume']));prev=list(history[-PUBLIC_RVOL_LOOKBACK:])
         if qmap.get(key)=='GOOD' and len(prev)>=PUBLIC_RVOL_LOOKBACK:
             av=mean(prev) if prev else 0;rvol=(vol/av) if av>0 else 0
@@ -158,13 +156,12 @@ def _date_plan(dates,folds=4):
 
 
 def _evaluate(name,kind,cands,dates,tests,lock,cfg=None):
-    if kind=='public':
+    if kind=='public_orb':
         base=lambda ds=None,sl=BASE_SLIPPAGE,late=0:_records_public(cands,ds,sl,late)
     else:
         base=lambda ds=None,sl=BASE_SLIPPAGE,late=0:_records_cfg(cands,cfg,ds,sl,late)
     full=_met(base(set(dates)));fold_rows=[]
-    for ds in tests:
-        m=_met(base(ds));fold_rows.append(m)
+    for ds in tests:fold_rows.append(_met(base(ds)))
     positive=sum(1 for m in fold_rows if m['profitFactor']>1 and m['expectancyPct']>0)
     lock_m=_met(base(lock));stress=_met(base(lock,BASE_SLIPPAGE*2,1))
     return {
@@ -180,16 +177,14 @@ def run_benchmark_lab(max_codes=40,profitability=None,robust=None):
     public=_public_candidates(codes,qmap);evaluation_dates=sorted({x['date'] for x in public});tests,lock=_date_plan(evaluation_dates)
     our=_our_orb_candidates(codes,qmap,set(evaluation_dates));cross=_cross_candidates(codes,qmap,set(evaluation_dates))
     a=_evaluate('Public-style 5m ORB + RVOL14 Top20','public_orb',public,evaluation_dates,tests,lock)
-    b=_evaluate('Our ORB + SIP60 + Pullback + Winner/Fast-Failure','our_orb_pf','cfg',our,evaluation_dates,tests,lock,_cfg('winner_extension')) if False else None
-    # Keep the call explicit to avoid any parameter ambiguity.
     b=_evaluate('Our ORB + SIP60 + Pullback + Winner/Fast-Failure','our_orb_pf',our,evaluation_dates,tests,lock,_cfg('winner_extension'))
     c=_evaluate('Cross Trend 2.0 fixed baseline','cross_v2',cross,evaluation_dates,tests,lock,_cfg('control_exit'))
     rows=[a,b,c]
     rows.sort(key=lambda x:(x['lockbox']['profitFactor']>1,x['lockbox']['expectancyPct'],x['full']['profitFactor']),reverse=True)
-    leader=rows[0]['id'] if rows else None
-    current={}
+    leader=rows[0]['id'] if rows else None;current={}
     if profitability:
-        best=profitability.get('best') or {};current['profitabilityLeader']={'strategy':best.get('strategy'),'entry':best.get('entryMode'),'exit':best.get('exit'),'full':best.get('full'),'oos':best.get('oos')}
+        best=profitability.get('best') or {}
+        current['profitabilityLeader']={'strategy':best.get('strategy'),'entry':best.get('entryMode'),'exit':best.get('exit'),'full':best.get('full'),'oos':best.get('oos')}
     if robust:
         current['currentRobustLockbox']=robust.get('lockbox');current['currentRobustStress']=robust.get('lockboxStress');current['currentRobustPass']=robust.get('pass')
     return {
