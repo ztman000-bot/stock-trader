@@ -22,6 +22,7 @@ command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 echo "Stock Day Trader temporary Android server"
 echo "- Paper/research only"
 echo "- REAL ORDER forced OFF"
+echo "- Android-safe in-app updater enabled"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
 
-exec python -m uvicorn unified_app:app --host 0.0.0.0 --port 8000
+exec python -m uvicorn android_unified_app:app --host 0.0.0.0 --port 8000
