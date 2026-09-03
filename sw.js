@@ -1,17 +1,17 @@
-const CACHE='stock-day-trader-live-v178-reliability-1m-exit';
+const CACHE='stock-day-trader-live-v1782-research-delta';
 const CORE_ASSETS=[
   '/classic',
-  '/styles.css?v=178',
-  '/js/app-safe.js?v=178',
+  '/styles.css?v=1782',
+  '/js/app-safe.js?v=1782',
   '/js/config.js',
-  '/js/ui-polish.js?v=178',
-  '/js/live-app.js?v=178',
-  '/js/trade-name-fix.js?v=178',
-  '/js/history-ui.js?v=178',
-  '/js/strategy-lab-ui.js?v=178',
-  '/js/market-lab-ui.js?v=178',
-  '/js/final-results-ui.js?v=178',
-  '/manifest.webmanifest?v=178',
+  '/js/ui-polish.js?v=1782',
+  '/js/live-app.js?v=1782',
+  '/js/trade-name-fix.js?v=1782',
+  '/js/history-ui.js?v=1782',
+  '/js/strategy-lab-ui.js?v=1782',
+  '/js/market-lab-ui.js?v=1782',
+  '/js/final-results-ui.js?v=1782',
+  '/manifest.webmanifest?v=1782',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
