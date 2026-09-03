@@ -50,18 +50,36 @@ APP_MODE=paper
 ENABLE_TRADING=false
 ```
 
-## 4. Preserve accumulated research data (optional but recommended)
+## 4. Preserve accumulated research data (recommended)
 
-Before copying the database, stop the Windows Stock Trader server completely so SQLite WAL writes have stopped. Copy:
+On Windows, first pull the latest project, then double-click:
 
 ```text
-Windows: C:\Users\jang0\stock-trader\server\market_data.db
-Android: ~/stock-trader/server/market_data.db
+C:\Users\jang0\stock-trader\EXPORT_PHONE_STATE.cmd
 ```
+
+It creates a consistent SQLite backup with SQLite's backup API, so the current server may still be running during the export. Output:
+
+```text
+C:\Users\jang0\stock-trader\phone_transfer\market_data.db
+C:\Users\jang0\stock-trader\phone_transfer\research_latest.json   (if available)
+```
+
+The export intentionally **does not include `.env`, App Key, App Secret, or any NH credential**.
+
+Copy `phone_transfer/market_data.db` to:
+
+```text
+~/stock-trader/server/market_data.db
+```
+
+`research_latest.json` is optional and can be copied to the same server folder; it will regenerate if omitted.
 
 Do not copy `.env` through GitHub. Use USB/local transfer or recreate it locally on the phone.
 
 If the database is not copied, the phone will start a new research history and old validation samples will remain only on the laptop.
+
+After the snapshot has been copied to the phone, shut down the Windows Stock Trader/laptop before starting the Android collector so only one collector is active.
 
 ## 5. Start manually first
 
