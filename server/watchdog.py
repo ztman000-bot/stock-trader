@@ -1,7 +1,8 @@
 """Windows watchdog for Stock Day Trader v0.17.8.
 
 Runs outside FastAPI, checks localhost health, and restarts the server after
-repeated local health failures. It pauses while the atomic update flag exists.
+repeated local health failures. It pauses while the atomic update flag exists or
+while the laptop server role is intentionally paused for a temporary phone server.
 No trading logic lives here. Designed to run under pythonw.exe with no console.
 """
 from __future__ import annotations
@@ -21,6 +22,8 @@ PYTHONW = BASE / '.venv' / 'Scripts' / 'pythonw.exe'
 SILENT_BOOT = BASE / 'silent_boot.py'
 LOG = Path(tempfile.gettempdir()) / 'stock_trader_watchdog.log'
 UPDATE_FLAG = Path(tempfile.gettempdir()) / 'stock_trader_update_in_progress.flag'
+ROLE_DIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'StockTrader'
+PAUSE_FLAG = ROLE_DIR / 'laptop_server_paused.flag'
 CHECK_SEC = max(10, int(os.getenv('STOCK_TRADER_WATCHDOG_CHECK_SEC', '20')))
 FAILURES_BEFORE_RESTART = max(2, int(os.getenv('STOCK_TRADER_WATCHDOG_FAILURES', '3')))
 COOLDOWN_SEC = max(30, int(os.getenv('STOCK_TRADER_WATCHDOG_COOLDOWN_SEC', '45')))
@@ -88,6 +91,9 @@ def kill_port_8000():
 
 
 def restart_server():
+    if PAUSE_FLAG.exists():
+        log('restart deferred: laptop server role paused for phone server')
+        return False
     if UPDATE_FLAG.exists():
         log('restart deferred: update in progress')
         return False
@@ -123,6 +129,10 @@ def main():
     failures = 0
     last_restart = 0.0
     while True:
+        if PAUSE_FLAG.exists():
+            failures = 0
+            time.sleep(CHECK_SEC)
+            continue
         if UPDATE_FLAG.exists():
             failures = 0
             time.sleep(CHECK_SEC)
