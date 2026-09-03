@@ -1,6 +1,9 @@
 # Temporary Android/Termux server profile.
 # Keep uvicorn without [standard] to avoid optional native extensions on Android.
+# Pin Pydantic v1 on Python 3.13 so pip can use the universal pure-Python wheel
+# instead of trying to build pydantic-core/maturin (Rust) on Android/Termux.
 fastapi==0.115.14
+pydantic==1.10.25
 uvicorn==0.30.6
 python-dotenv==1.0.1
 nhplug==0.3.1
