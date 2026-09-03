@@ -18,6 +18,11 @@ fail(){
   exit 1
 }
 
+env_has(){
+  local key="$1" value="$2"
+  grep -Eq "^${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$SERVER/.env"
+}
+
 start_server(){
   cd "$SERVER"
   nohup env \
@@ -49,8 +54,8 @@ rollback_and_restart(){
 }
 
 cd "$SERVER"
-grep -q '^APP_MODE=paper$' .env || fail 'APP_MODE=paper not verified'
-grep -q '^ENABLE_TRADING=false$' .env || fail 'ENABLE_TRADING=false not verified'
+env_has APP_MODE paper || fail 'APP_MODE=paper not verified'
+env_has ENABLE_TRADING false || fail 'ENABLE_TRADING=false not verified'
 
 cd "$ROOT"
 DIRTY="$(git status --porcelain --untracked-files=no)"
@@ -79,8 +84,8 @@ cd "$SERVER"
 "$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py || rollback_and_restart
 "$PREFIX/bin/python" preflight.py || rollback_and_restart
 
-grep -q '^APP_MODE=paper$' .env || rollback_and_restart
-grep -q '^ENABLE_TRADING=false$' .env || rollback_and_restart
+env_has APP_MODE paper || rollback_and_restart
+env_has ENABLE_TRADING false || rollback_and_restart
 
 if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] stopping old server PID=$SERVER_PID"
