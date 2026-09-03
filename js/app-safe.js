@@ -9,4 +9,9 @@ if('serviceWorker' in navigator){
 }
 
 const liveClassic=location.pathname==='/classic'||location.pathname.startsWith('/classic/');
-if(liveClassic){import('./ui-polish.js?v=1782').catch(showBootError);import('./live-app.js?v=1782').catch(showBootError);import('./trade-name-fix.js?v=1782').catch(showBootError)}else import('./app.js?v=1782').catch(showBootError);
+if(liveClassic){
+  import('./ui-polish.js?v=1782').catch(showBootError);
+  import('./live-app.js?v=1782').catch(showBootError);
+  import('./trade-name-fix.js?v=1782').catch(showBootError);
+  import('./scanner-resilience.js?v=1788461001').catch(showBootError);
+}else import('./app.js?v=1782').catch(showBootError);
