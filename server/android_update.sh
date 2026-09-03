@@ -40,7 +40,11 @@ rollback_and_restart(){
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] rolling back to $OLD_HEAD"
   cd "$ROOT"
   [ -n "$OLD_HEAD" ] && git reset --hard "$OLD_HEAD" || true
-  start_server
+  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] old server still alive; rollback complete without duplicate restart"
+  else
+    start_server
+  fi
   exit 1
 }
 
