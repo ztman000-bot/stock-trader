@@ -1,17 +1,18 @@
-const CACHE='stock-day-trader-live-v1782-research-delta';
+const CACHE='stock-day-trader-live-v1788465000-android-update';
 const CORE_ASSETS=[
   '/classic',
-  '/styles.css?v=1782',
-  '/js/app-safe.js?v=1782',
+  '/styles.css?v=1788465000',
+  '/js/app-safe.js?v=1788465000',
   '/js/config.js',
-  '/js/ui-polish.js?v=1782',
-  '/js/live-app.js?v=1782',
-  '/js/trade-name-fix.js?v=1782',
-  '/js/history-ui.js?v=1782',
-  '/js/strategy-lab-ui.js?v=1782',
-  '/js/market-lab-ui.js?v=1782',
-  '/js/final-results-ui.js?v=1782',
-  '/manifest.webmanifest?v=1782',
+  '/js/ui-polish.js?v=1788465000',
+  '/js/live-app.js?v=1788465000',
+  '/js/trade-name-fix.js?v=1788465000',
+  '/js/scanner-resilience.js?v=1788465000',
+  '/js/history-ui.js?v=1788465000',
+  '/js/strategy-lab-ui.js?v=1788465000',
+  '/js/market-lab-ui.js?v=1788465000',
+  '/js/final-results-ui.js?v=1788465000',
+  '/manifest.webmanifest?v=1788465000',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
