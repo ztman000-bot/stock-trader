@@ -5,13 +5,13 @@ const showBootError=err=>{console.error('Stock Day Trader boot error:',err);cons
 window.addEventListener('error',e=>showBootError(e.error||e.message));window.addEventListener('unhandledrejection',e=>showBootError(e.reason));
 
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js?v=1782',{updateViaCache:'none'}).catch(()=>{});
+  navigator.serviceWorker.register('/sw.js?v=1788465000',{updateViaCache:'none'}).catch(()=>{});
 }
 
 const liveClassic=location.pathname==='/classic'||location.pathname.startsWith('/classic/');
 if(liveClassic){
-  import('./ui-polish.js?v=1782').catch(showBootError);
-  import('./live-app.js?v=1782').catch(showBootError);
-  import('./trade-name-fix.js?v=1782').catch(showBootError);
-  import('./scanner-resilience.js?v=1788461001').catch(showBootError);
-}else import('./app.js?v=1782').catch(showBootError);
+  import('./ui-polish.js?v=1788465000').catch(showBootError);
+  import('./live-app.js?v=1788465000').catch(showBootError);
+  import('./trade-name-fix.js?v=1788465000').catch(showBootError);
+  import('./scanner-resilience.js?v=1788465000').catch(showBootError);
+}else import('./app.js?v=1788465000').catch(showBootError);
