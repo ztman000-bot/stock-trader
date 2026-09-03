@@ -33,12 +33,18 @@ start_server(){
     FOCUS_SIZE="${FOCUS_SIZE:-20}" \
     NH_REST_MIN_INTERVAL="${NH_REST_MIN_INTERVAL:-0.30}" \
     TEMP_PHONE_SERVER=true \
+    PHONE_PERFORMANCE_PROFILE="${PHONE_PERFORMANCE_PROFILE:-dedicated}" \
+    FAST_RESEARCH_START_DELAY_SEC="${FAST_RESEARCH_START_DELAY_SEC:-90}" \
+    FAST_RESEARCH_INTERVAL_MIN="${FAST_RESEARCH_INTERVAL_MIN:-60}" \
+    RESEARCH_INTERVAL_MIN="${RESEARCH_INTERVAL_MIN:-120}" \
+    HISTORY_MIN_INTERVAL_MIN="${HISTORY_MIN_INTERVAL_MIN:-240}" \
+    PYTHONUNBUFFERED=1 \
     "$PREFIX/bin/python" -m uvicorn android_unified_app:app \
-      --host 0.0.0.0 --port 8000 \
+      --host 0.0.0.0 --port 8000 --workers 1 --no-access-log \
       >> "$HOME/stock-trader-server.log" 2>&1 &
   NEWPID=$!
   echo "$NEWPID" > "$PIDFILE"
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] server start PID=$NEWPID"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] server start PID=$NEWPID profile=${PHONE_PERFORMANCE_PROFILE:-dedicated}"
 }
 
 rollback_and_restart(){
