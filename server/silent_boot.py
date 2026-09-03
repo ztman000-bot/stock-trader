@@ -24,6 +24,8 @@ WATCHDOG = BASE / "watchdog.py"
 HEALTH_PROBE = BASE / "health_probe.py"
 LOG = Path(tempfile.gettempdir()) / "stock_trader_bootstrap.log"
 UPDATE_FLAG = Path(tempfile.gettempdir()) / "stock_trader_update_in_progress.flag"
+ROLE_DIR = Path(os.getenv("LOCALAPPDATA") or tempfile.gettempdir()) / "StockTrader"
+PAUSE_FLAG = ROLE_DIR / "laptop_server_paused.flag"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
@@ -67,7 +69,7 @@ def _popen_hidden(args, *, env=None, stdout=None, stderr=None):
 
 
 def ensure_watchdog() -> None:
-    if os.getenv("STOCK_TRADER_SKIP_WATCHDOG") == "1":
+    if os.getenv("STOCK_TRADER_SKIP_WATCHDOG") == "1" or PAUSE_FLAG.exists():
         return
     if not PYTHONW.exists() or not WATCHDOG.exists():
         return
@@ -78,6 +80,9 @@ def ensure_watchdog() -> None:
 
 
 def start_server() -> bool:
+    if PAUSE_FLAG.exists():
+        log("laptop server role paused; bootstrap skipped")
+        return True
     if healthy(1.5):
         log("server already healthy")
         return True
@@ -116,7 +121,7 @@ def start_server() -> bool:
 
 
 def best_effort_backfill() -> None:
-    if not PYTHON.exists() or not HEALTH_PROBE.exists():
+    if PAUSE_FLAG.exists() or not PYTHON.exists() or not HEALTH_PROBE.exists():
         return
     try:
         subprocess.run(
@@ -130,6 +135,9 @@ def best_effort_backfill() -> None:
 
 def main() -> int:
     if os.name != "nt":
+        return 0
+    if PAUSE_FLAG.exists():
+        log("laptop server role paused; autostart ignored")
         return 0
     if not single_bootstrap():
         return 0
