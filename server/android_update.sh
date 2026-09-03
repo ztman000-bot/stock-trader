@@ -7,8 +7,10 @@ PREFIX=/data/data/com.termux/files/usr
 SERVER_PID="${1:-}"
 PIDFILE="$HOME/stock-trader-server.pid"
 LOG="$HOME/stock-trader-update.log"
+SERVER_LOG="$HOME/stock-trader-server.log"
 OLD_HEAD=""
 NEWPID=""
+OLD_STOPPED=0
 
 exec >>"$LOG" 2>&1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Android update start"
@@ -23,8 +25,21 @@ env_has(){
   grep -Eq "^${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$SERVER/.env"
 }
 
+health_ok(){
+  "$PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
+import urllib.request
+try:
+    with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3) as r:
+        body=r.read(512).decode('utf-8','ignore').replace(' ','').lower()
+        raise SystemExit(0 if r.status==200 and '"ok":true' in body else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 start_server(){
   cd "$SERVER"
+  command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
   nohup env \
     APP_MODE=paper \
     ENABLE_TRADING=false \
@@ -41,23 +56,55 @@ start_server(){
     PYTHONUNBUFFERED=1 \
     "$PREFIX/bin/python" -m uvicorn android_unified_app:app \
       --host 0.0.0.0 --port 8000 --workers 1 --no-access-log \
-      >> "$HOME/stock-trader-server.log" 2>&1 &
+      >> "$SERVER_LOG" 2>&1 &
   NEWPID=$!
   echo "$NEWPID" > "$PIDFILE"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] server start PID=$NEWPID profile=${PHONE_PERFORMANCE_PROFILE:-dedicated}"
+}
+
+wait_health(){
+  local tries="${1:-60}"
+  for _ in $(seq 1 "$tries"); do
+    if health_ok; then return 0; fi
+    if [ -n "$NEWPID" ] && ! kill -0 "$NEWPID" 2>/dev/null; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] server process exited before health became ready"
+      return 1
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 rollback_and_restart(){
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] rolling back to $OLD_HEAD"
   cd "$ROOT"
   [ -n "$OLD_HEAD" ] && git reset --hard "$OLD_HEAD" || true
-  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] old server still alive; rollback complete without duplicate restart"
+  if health_ok; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] server already healthy after rollback"
+    OLD_STOPPED=0
+    exit 1
+  fi
+  start_server
+  if wait_health 60; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] rollback server healthy"
+    OLD_STOPPED=0
   else
-    start_server
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] rollback restart FAILED"
+    tail -n 60 "$SERVER_LOG" 2>/dev/null || true
   fi
   exit 1
 }
+
+emergency_exit(){
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$OLD_STOPPED" = "1" ] && ! health_ok; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] emergency restart guard triggered"
+    start_server || true
+    wait_health 30 || true
+  fi
+  exit "$rc"
+}
+trap emergency_exit EXIT
 
 cd "$SERVER"
 env_has APP_MODE paper || fail 'APP_MODE=paper not verified'
@@ -96,6 +143,7 @@ env_has ENABLE_TRADING false || rollback_and_restart
 if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] stopping old server PID=$SERVER_PID"
   kill "$SERVER_PID" 2>/dev/null || true
+  OLD_STOPPED=1
   for _ in 1 2 3 4 5 6 7 8; do
     kill -0 "$SERVER_PID" 2>/dev/null || break
     sleep 1
@@ -104,20 +152,13 @@ fi
 
 start_server
 
-READY=0
-for _ in $(seq 1 120); do
-  if curl -fsS --max-time 3 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
-    READY=1
-    break
-  fi
-  sleep 2
-done
-
-if [ "$READY" != "1" ]; then
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] new server health timeout"
+if ! wait_health 60; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] new server health failed"
   [ -n "$NEWPID" ] && kill "$NEWPID" 2>/dev/null || true
   rollback_and_restart
 fi
 
+OLD_STOPPED=0
+trap - EXIT
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] UPDATE OK HEAD=$(git -C "$ROOT" rev-parse HEAD) PID=$NEWPID"
 exit 0
