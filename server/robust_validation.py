@@ -1,7 +1,6 @@
-"""Robust validation v0.17.5.
+"""Robust validation v0.17.8.
 GOOD-only data, walk-forward development folds, untouched final lockbox, cost/fill stress,
-and an explicit KR 1-minute data-coverage gate.
-Research only; Control/live rules are never changed.
+and KR 1-minute Exit Replay validation. Research only; Control/live rules are never changed.
 """
 from profitability_lab import (
     _candidates,_eval,FILTERS,EXIT_CONFIGS,REGIME_MODES,SURGE_MODES,
@@ -12,6 +11,10 @@ try:
     from kr_1m_research import coverage as kr_1m_coverage
 except Exception:
     kr_1m_coverage = None
+try:
+    from one_minute_exit_replay import validation_status as one_minute_replay_status
+except Exception:
+    one_minute_replay_status = None
 
 
 def _date_slices(cands,folds=4):
@@ -25,34 +28,37 @@ def _date_slices(cands,folds=4):
 
 
 def _one_minute_status():
-    base={
-        'ready':False,
-        'dataReady':False,
-        'bars':0,
-        'completeDates':0,
-        'completeCodeDays':0,
-        'reason':'KR 1분봉 데이터를 축적 중입니다. 데이터가 충분해져도 실제 1분봉 Exit 재현 엔진을 연결하기 전에는 실전 승격 근거로 사용하지 않습니다.'
-    }
+    base={'ready':False,'dataReady':False,'engineConnected':False,'bars':0,'completeDates':0,
+          'completeCodeDays':0,'reason':'KR 1분봉 데이터/Exit Replay 검증을 준비 중입니다.'}
     if kr_1m_coverage is None:
-        base['reason']='KR 1분봉 수집 모듈을 불러오지 못했습니다. 1분봉 Exit 검증은 미완료 상태로 유지합니다.'
+        base['reason']='KR 1분봉 수집 모듈을 불러오지 못했습니다.'
         return base
     try:
         c=kr_1m_coverage() or {}
-        base.update({
-            'dataReady':bool(c.get('dataReady')),
-            'bars':int(c.get('bars') or 0),
-            'completeBars':int(c.get('completeBars') or 0),
-            'days':int(c.get('days') or 0),
-            'completeDates':int(c.get('completeDates') or 0),
-            'completeCodeDays':int(c.get('completeCodeDays') or 0),
-            'partialCodeDays':int(c.get('partialCodeDays') or 0),
-            'dataReadyRule':c.get('dataReadyRule'),
-        })
-        if base['dataReady']:
-            base['reason']='KR 1분봉 데이터 최소 커버리지 게이트는 충족했습니다. 다음 단계인 실제 1분봉 Exit/체결 순서 재현 엔진 검증 전까지 ready=False를 유지합니다.'
-        return base
+        base.update({'dataReady':bool(c.get('dataReady')),'bars':int(c.get('bars') or 0),
+            'completeBars':int(c.get('completeBars') or 0),'days':int(c.get('days') or 0),
+            'completeDates':int(c.get('completeDates') or 0),'completeCodeDays':int(c.get('completeCodeDays') or 0),
+            'partialCodeDays':int(c.get('partialCodeDays') or 0),'dataReadyRule':c.get('dataReadyRule')})
     except Exception as exc:
         base['reason']=f'KR 1분봉 커버리지 확인 실패: {type(exc).__name__}: {exc}'
+        return base
+    if one_minute_replay_status is None:
+        base['reason']='1분봉 데이터는 있으나 Exit Replay 모듈을 불러오지 못했습니다.'
+        return base
+    try:
+        r=one_minute_replay_status() or {}
+        base['engineConnected']=bool(r.get('engineConnected'))
+        base['replay']=r
+        base['ready']=bool(base['dataReady'] and r.get('validated'))
+        if not base['dataReady']:
+            base['reason']='1분봉 최소 데이터 커버리지를 축적 중입니다. Exit Replay는 연결되어 있습니다.'
+        elif not r.get('validated'):
+            base['reason']='1분봉 데이터 게이트는 충족했지만 Paper replay 표본/경로 일치 검증이 아직 부족합니다.'
+        else:
+            base['reason']='1분봉 데이터와 Exit Replay 검증 게이트를 모두 충족했습니다. 이는 연구 검증이며 실주문 승격을 의미하지 않습니다.'
+        return base
+    except Exception as exc:
+        base['reason']=f'1분봉 Exit Replay 확인 실패: {type(exc).__name__}: {exc}'
         return base
 
 
@@ -75,37 +81,28 @@ def run_robust_validation(max_codes=40):
         if not ranked:continue
         _,_,f,cfg,rm,sm,em,pm,tr=ranked[0]
         te=_eval(cands,f,cfg,rm,sm,test,entry_mode=em,play_mode=pm)
-        results.append({
-            'train':tr,'test':te,'strategy':f['id'],'exit':cfg['id'],'market':rm['id'],
-            'surge':sm['id'],'entry':em['id'],'play':pm['id']
-        })
+        results.append({'train':tr,'test':te,'strategy':f['id'],'exit':cfg['id'],'market':rm['id'],
+                        'surge':sm['id'],'entry':em['id'],'play':pm['id']})
     positive=sum(1 for x in results if x['test']['profitFactor']>1 and x['test']['expectancyPct']>0)
     if results:
         winner=max(results,key=lambda x:(x['test']['profitFactor']>1 and x['test']['expectancyPct']>0,x['test']['expectancyPct'],x['test']['profitFactor']))
-        f=next(x for x in FILTERS if x['id']==winner['strategy'])
-        cfg=next(x for x in EXIT_CONFIGS if x['id']==winner['exit'])
-        rm=next(x for x in REGIME_MODES if x['id']==winner['market'])
-        sm=next(x for x in SURGE_MODES if x['id']==winner['surge'])
-        em=next(x for x in ENTRY_MODES if x['id']==winner['entry'])
-        pm=next(x for x in PLAY_MODES if x['id']==winner['play'])
+        f=next(x for x in FILTERS if x['id']==winner['strategy']);cfg=next(x for x in EXIT_CONFIGS if x['id']==winner['exit'])
+        rm=next(x for x in REGIME_MODES if x['id']==winner['market']);sm=next(x for x in SURGE_MODES if x['id']==winner['surge'])
+        em=next(x for x in ENTRY_MODES if x['id']==winner['entry']);pm=next(x for x in PLAY_MODES if x['id']==winner['play'])
         lock=_eval(cands,f,cfg,rm,sm,lockbox,entry_mode=em,play_mode=pm)
         stress=_eval(cands,f,cfg,rm,sm,lockbox,BASE_SLIPPAGE*2,1,em,pm)
         selected={'strategy':f['id'],'exit':cfg['id'],'entry':em['id'],'market':rm['id'],'surge':sm['id'],'play':pm['id']}
     else:
         lock={'trades':0,'profitFactor':0,'expectancyPct':0,'winRate':0,'avgWinPct':0,'avgLossPct':0,'payoffRatio':0,'maxDrawdownPct':0}
         stress=dict(lock);selected=None
-    pass_gate=bool(
-        results and positive>=max(2,len(results)-1) and
-        lock['trades']>=10 and lock['profitFactor']>1 and lock['expectancyPct']>0 and
-        stress['profitFactor']>=1 and stress['expectancyPct']>=0
-    )
-    return {
-        'ok':True,'version':'0.17.5','researchOnly':True,'qualityGate':'GOOD_ONLY',
+    research_pass=bool(results and positive>=max(2,len(results)-1) and lock['trades']>=10 and
+        lock['profitFactor']>1 and lock['expectancyPct']>0 and stress['profitFactor']>=1 and stress['expectancyPct']>=0)
+    one_min=_one_minute_status()
+    return {'ok':True,'version':'0.17.8','researchOnly':True,'qualityGate':'GOOD_ONLY',
         'candidateTrades':len(cands),'selectedForLockbox':selected,
         'walkForward':{'folds':len(results),'positiveFolds':positive,'results':results},
-        'lockbox':lock,'lockboxStress':stress,
-        'oneMinuteExitValidation':_one_minute_status(),
-        'pass':pass_gate,
-        'gate':'GOOD data + walk-forward 반복 양수 + 미사용 final lockbox 양수 + lockbox 2x slippage/1bar-late 방어',
-        'liveRuleAutoMutation':False,'realOrderEnabled':False
-    }
+        'lockbox':lock,'lockboxStress':stress,'oneMinuteExitValidation':one_min,
+        'pass':research_pass,'deploymentReady':bool(research_pass and one_min.get('ready')),
+        'gate':'GOOD data + walk-forward 반복 양수 + final lockbox 양수 + 2x slippage/1bar-late 방어',
+        'deploymentGate':'research pass + KR 1m Exit Replay validation; NH simulation/micro-live는 별도 단계',
+        'liveRuleAutoMutation':False,'realOrderEnabled':False}
