@@ -58,7 +58,10 @@ call "server\start_stock_trader_background.cmd"
 set "ROLLBACK_OK=0"
 for /L %%N in (1,1,35) do (
   powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 1; if($r.ok){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>&1
-  if not errorlevel 1 set "ROLLBACK_OK=1"&goto :rollback_done
+  if not errorlevel 1 (
+    set "ROLLBACK_OK=1"
+    goto :rollback_done
+  )
   timeout /t 1 /nobreak >nul
 )
 :rollback_done
