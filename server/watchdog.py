@@ -17,14 +17,15 @@ from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-START_CMD = BASE / 'start_stock_trader_background.cmd'
+PYTHONW = BASE / '.venv' / 'Scripts' / 'pythonw.exe'
+SILENT_BOOT = BASE / 'silent_boot.py'
 LOG = Path(tempfile.gettempdir()) / 'stock_trader_watchdog.log'
 UPDATE_FLAG = Path(tempfile.gettempdir()) / 'stock_trader_update_in_progress.flag'
 CHECK_SEC = max(10, int(os.getenv('STOCK_TRADER_WATCHDOG_CHECK_SEC', '20')))
 FAILURES_BEFORE_RESTART = max(2, int(os.getenv('STOCK_TRADER_WATCHDOG_FAILURES', '3')))
 COOLDOWN_SEC = max(30, int(os.getenv('STOCK_TRADER_WATCHDOG_COOLDOWN_SEC', '45')))
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-DETACHED_PROCESS = getattr(subprocess, 'DETACHED_PROCESS', 0)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
 
 
 def log(msg):
@@ -60,8 +61,9 @@ def healthy():
 
 def _run_hidden(args, timeout=15, env=None):
     return subprocess.run(
-        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
-        env=env, creationflags=CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        [str(x) for x in args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        timeout=timeout, env=env,
+        creationflags=CREATE_NO_WINDOW if os.name == 'nt' else 0,
     )
 
 
@@ -89,16 +91,16 @@ def restart_server():
     if UPDATE_FLAG.exists():
         log('restart deferred: update in progress')
         return False
-    log('health failed repeatedly; restarting localhost server')
+    log('health failed repeatedly; restarting localhost server windowless')
     kill_port_8000()
     env = os.environ.copy()
     env['STOCK_TRADER_SKIP_WATCHDOG'] = '1'
     try:
+        flags = (CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP) if os.name == 'nt' else 0
         subprocess.Popen(
-            ['cmd.exe', '/d', '/c', str(START_CMD)], cwd=str(BASE), env=env,
+            [str(PYTHONW), str(SILENT_BOOT)], cwd=str(BASE), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=(CREATE_NO_WINDOW | DETACHED_PROCESS) if os.name == 'nt' else 0,
-            close_fds=True,
+            creationflags=flags, close_fds=True,
         )
     except Exception as exc:
         log(f'restart command error: {type(exc).__name__}: {exc}')
