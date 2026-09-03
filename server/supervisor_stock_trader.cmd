@@ -2,13 +2,14 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "LOG=%TEMP%\stock_trader_supervisor.log"
-echo [%date% %time%] Supervisor check. >> "%LOG%"
-powershell -NoProfile -Command "try { $h=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 4; $u=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/system/ui-health' -TimeoutSec 4; $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/system/runtime-health' -TimeoutSec 4; if($h.ok -and $u.ok -and $r.ok){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>&1
+rem Legacy compatibility wrapper only. New install_autostart removes the old
+rem every-minute supervisor task and uses one persistent pythonw watchdog.
+".venv\Scripts\python.exe" health_probe.py runtime >nul 2>&1
 if not errorlevel 1 exit /b 0
-echo [%date% %time%] Health/UI/runtime check failed; starting recovery. >> "%LOG%"
+echo [%date% %time%] Legacy supervisor recovery requested. >> "%LOG%"
 call "start_stock_trader_background.cmd" >> "%LOG%" 2>&1
 timeout /t 5 /nobreak >nul
-powershell -NoProfile -Command "try { $h=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 4; $u=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/system/ui-health' -TimeoutSec 4; if($h.ok -and $u.ok){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>&1
+".venv\Scripts\python.exe" health_probe.py full >nul 2>&1
 if errorlevel 1 (
  echo [%date% %time%] Recovery attempt did not become healthy. >> "%LOG%"
  exit /b 1
