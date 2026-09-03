@@ -1,8 +1,9 @@
 """Atomic/quiet updater for Stock Day Trader.
 
-Designed to keep the known-good server alive until the new checkout passes preflight.
-After server replacement it verifies localhost health and rolls back to the previous
-Git commit if startup fails. No PowerShell is used.
+Keeps the known-good server alive until the new checkout passes preflight. After
+replacement it verifies localhost health and rolls back to the previous Git commit
+if startup fails. Automatic startup prefers the windowless Python bootstrap; the
+legacy cmd starter is retained only as a rollback compatibility fallback.
 """
 from __future__ import annotations
 
@@ -19,13 +20,15 @@ from pathlib import Path
 SERVER = Path(__file__).resolve().parent
 ROOT = SERVER.parent
 PYTHON = SERVER / ".venv" / "Scripts" / "python.exe"
+PYTHONW = SERVER / ".venv" / "Scripts" / "pythonw.exe"
+SILENT_BOOT = SERVER / "silent_boot.py"
 START_CMD = SERVER / "start_stock_trader_background.cmd"
 PREFLIGHT = SERVER / "preflight.py"
 REQ = SERVER / "requirements.txt"
 FLAG = Path(tempfile.gettempdir()) / "stock_trader_update_in_progress.flag"
 LOG = Path(tempfile.gettempdir()) / "stock_trader_remote_update.log"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
 def log(msg: str):
@@ -81,8 +84,10 @@ def listeners():
     if os.name != "nt":
         return []
     try:
-        out = subprocess.check_output(["netstat", "-ano"], text=True, errors="ignore",
-                                      creationflags=CREATE_NO_WINDOW)
+        out = subprocess.check_output(
+            ["netstat", "-ano"], text=True, errors="ignore",
+            creationflags=CREATE_NO_WINDOW,
+        )
     except Exception:
         return []
     pids = set()
@@ -106,12 +111,20 @@ def stop_server():
 
 def start_server():
     env = os.environ.copy()
-    flags = CREATE_NO_WINDOW | DETACHED_PROCESS if os.name == "nt" else 0
-    subprocess.Popen(
-        ["cmd.exe", "/d", "/c", str(START_CMD)], cwd=str(SERVER), env=env,
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=flags, close_fds=True,
-    )
+    flags = (CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
+    if SILENT_BOOT.exists() and PYTHONW.exists():
+        env["STOCK_TRADER_SKIP_WATCHDOG"] = "1"
+        subprocess.Popen(
+            [str(PYTHONW), str(SILENT_BOOT)], cwd=str(SERVER), env=env,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=flags, close_fds=True,
+        )
+    else:
+        subprocess.Popen(
+            ["cmd.exe", "/d", "/c", str(START_CMD)], cwd=str(SERVER), env=env,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0, close_fds=True,
+        )
     for _ in range(50):
         if healthy(1.5):
             return True
