@@ -1,6 +1,7 @@
 import os
 import subprocess
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
@@ -13,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ANDROID_UPDATE_SCRIPT = BASE_DIR / 'android_update.sh'
 
-# unified_app keeps the Windows updater for laptop use.  On Android we replace
+# unified_app keeps the Windows updater for laptop use. On Android we replace
 # only the update POST routes; every trading/research route remains unchanged.
 _UPDATE_PATHS = {'/api/system/update', '/api/system/update/run'}
 app.router.routes[:] = [
@@ -91,7 +92,7 @@ def android_update_request(request):
             }, 409)
         base._UPDATE.update({
             'running': True,
-            'requestedAt': base.datetime.now().isoformat(),
+            'requestedAt': datetime.now().isoformat(),
             'lastError': None,
             'launcher': 'android-termux',
         })
