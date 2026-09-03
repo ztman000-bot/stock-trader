@@ -2,8 +2,8 @@
 
 Keeps the known-good server alive until the new checkout passes preflight. After
 replacement it verifies localhost health and rolls back to the previous Git commit
-if startup fails. Automatic startup prefers the windowless Python bootstrap; the
-legacy cmd starter is retained only as a rollback compatibility fallback.
+if startup fails. If the laptop server role is intentionally paused for the Android
+phone, it updates/preflights code without starting the Windows server.
 """
 from __future__ import annotations
 
@@ -27,6 +27,8 @@ PREFLIGHT = SERVER / "preflight.py"
 REQ = SERVER / "requirements.txt"
 FLAG = Path(tempfile.gettempdir()) / "stock_trader_update_in_progress.flag"
 LOG = Path(tempfile.gettempdir()) / "stock_trader_remote_update.log"
+ROLE_DIR = Path(os.getenv("LOCALAPPDATA") or tempfile.gettempdir()) / "StockTrader"
+PAUSE_FLAG = ROLE_DIR / "laptop_server_paused.flag"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
@@ -110,6 +112,9 @@ def stop_server():
 
 
 def start_server():
+    if PAUSE_FLAG.exists():
+        log("start skipped: laptop server role paused")
+        return True
     env = os.environ.copy()
     flags = (CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
     if SILENT_BOOT.exists() and PYTHONW.exists():
@@ -177,8 +182,12 @@ def main():
             log("ERROR preflight: " + (pre.stdout or "").strip()[-1500:])
             run(["git", "reset", "--hard", old_head], timeout=90)
             return 5
-        log("preflight OK; replacing server")
 
+        if PAUSE_FLAG.exists():
+            log("UPDATE OK: code/preflight updated while laptop server role paused; no Windows server start")
+            return 0
+
+        log("preflight OK; replacing server")
         if not stop_server():
             log("ERROR: port 8000 did not release")
             rollback(old_head)
