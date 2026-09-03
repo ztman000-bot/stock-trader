@@ -1,23 +1,21 @@
-const CACHE='stock-day-trader-live-v1771-fast-boot';
+const CACHE='stock-day-trader-live-v178-reliability-1m-exit';
 const CORE_ASSETS=[
   '/classic',
-  '/styles.css?v=1771',
-  '/js/app-safe.js?v=1771',
+  '/styles.css?v=178',
+  '/js/app-safe.js?v=178',
   '/js/config.js',
-  '/js/ui-polish.js?v=1771',
-  '/js/live-app.js?v=1771',
-  '/js/trade-name-fix.js?v=1771',
-  '/js/history-ui.js?v=1771',
-  '/js/strategy-lab-ui.js?v=1771',
-  '/js/market-lab-ui.js?v=1771',
-  '/js/final-results-ui.js?v=1771',
-  '/manifest.webmanifest?v=1771',
+  '/js/ui-polish.js?v=178',
+  '/js/live-app.js?v=178',
+  '/js/trade-name-fix.js?v=178',
+  '/js/history-ui.js?v=178',
+  '/js/strategy-lab-ui.js?v=178',
+  '/js/market-lab-ui.js?v=178',
+  '/js/final-results-ui.js?v=178',
+  '/manifest.webmanifest?v=178',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
 
-// Install is atomic: if the new shell cannot be cached completely, this
-// worker does not activate and the previous known-good cache stays alive.
 self.addEventListener('install',event=>{
   event.waitUntil(
     caches.open(CACHE)
@@ -26,7 +24,6 @@ self.addEventListener('install',event=>{
   );
 });
 
-// Old caches are removed only after the new app shell installed successfully.
 self.addEventListener('activate',event=>{
   event.waitUntil(
     Promise.all([
@@ -49,16 +46,11 @@ function networkRefresh(request){
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET')return;
   const url=new URL(event.request.url);
-
-  // Trading/research data must always come from the live backend.
   if(url.pathname.startsWith('/api/')){
     event.respondWith(fetch(event.request,{cache:'no-store'}));
     return;
   }
   if(url.origin!==self.location.origin)return;
-
-  // App shell is cache-first so Android can leave the splash screen quickly.
-  // A fresh copy is fetched in the background and used on the next request.
   const refresh=networkRefresh(event.request);
   event.waitUntil(refresh.then(()=>{}).catch(()=>{}));
   event.respondWith(
