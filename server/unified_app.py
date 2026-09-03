@@ -20,13 +20,14 @@ from kr_1m_research import start as kr_1m_start,research_status as kr_1m_status,
 from scanner_intelligence import start as scanner_intel_start,status as scanner_intel_status,scan as scanner_intel_scan,snapshot_stats as scanner_intel_snapshot_stats
 from scanner_intelligence_daemon import start as scanner_lab_start,latest as scanner_lab_latest,status as scanner_lab_status
 from decision_intelligence import start as decision_intel_start,status as decision_intel_status,report as decision_intel_report
+from one_minute_exit_replay import validation_status as one_minute_exit_status
 
 BASE_DIR=Path(__file__).resolve().parent
 ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.7'
+UI_VERSION='0.17.8'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -71,7 +72,7 @@ def update_request(request):
         if dirty:return JSONResponse({'ok':False,'error':'추적 파일에 로컬 변경이 있어 업데이트를 차단했습니다.','dirty':dirty},409)
         _UPDATE.update({'running':True,'requestedAt':datetime.now().isoformat(),'lastError':None,'launcher':'cmd-direct'})
     threading.Thread(target=_run_update,daemon=True).start()
-    return JSONResponse({'ok':True,'message':'업데이트를 시작했습니다.'})
+    return JSONResponse({'ok':True,'message':'업데이트를 시작했습니다. 사전검사 후 교체하며 실패 시 이전 커밋으로 복구합니다.'})
 
 def update_status(request):return JSONResponse({'ok':True,'uiVersion':UI_VERSION,'update':dict(_UPDATE)})
 
@@ -118,6 +119,10 @@ def decision_intelligence_state(request):
     try:return JSONResponse(decision_intel_report(int(request.query_params.get('limit','40'))))
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Decision Intelligence 오류: {type(exc).__name__}: {exc}'},500)
 
+def one_minute_exit_replay_state(request):
+    try:return JSONResponse(one_minute_exit_status())
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'1m Exit Replay 오류: {type(exc).__name__}: {exc}'},500)
+
 def us_research_state(request):
     try:return JSONResponse({'ok':True,'status':us_research_status(),'latest':latest_us_research(int(request.query_params.get('limit','20')))})
     except Exception as exc:return JSONResponse({'ok':False,'error':f'US Research 오류: {type(exc).__name__}: {exc}'},500)
@@ -139,14 +144,14 @@ def runtime_health(request):
         'maxQuoteAgeSec':round(max_age,1) if max_age is not None else None,
         'quotesFresh':fresh,'historyPausedForLive':bool(hs.get('pausedForLive')),
         'historyLivePriority':bool(hs.get('liveSessionPriority')),
-        'krOneMinuteResearch':kr_1m_status(),
-        'scannerIntelligence':scanner_intel_status(),
+        'krOneMinuteResearch':kr_1m_status(),'scannerIntelligence':scanner_intel_status(),
         'decisionIntelligence':decision_intel_status(),
+        'watchdogExpected':True,'atomicUpdateRollback':True,
         'newEntriesAllowedByRuntime':ok,'realOrderEnabled':False
     },200 if ok else 503)
 
 def final_research(request):return JSONResponse(research_latest())
-def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'krOneMinute':kr_1m_status(),'usResearch':us_research_status(),'scannerIntelligence':scanner_intel_status(),'scannerResearch':scanner_lab_status(),'decisionIntelligence':decision_intel_status()})
+def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'krOneMinute':kr_1m_status(),'usResearch':us_research_status(),'scannerIntelligence':scanner_intel_status(),'scannerResearch':scanner_lab_status(),'decisionIntelligence':decision_intel_status(),'oneMinuteExitReplayConnected':True})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 
 def history_start(request):
@@ -161,7 +166,7 @@ def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.7','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.8','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'scannerIntelligence':True,'timeOfDayRvol':True,'rvol5':True,'rvol15':True,'rvol30':True,
@@ -178,9 +183,11 @@ def ui_health(request):
         'backtest':{
             'enabled':True,'engine':'precise-portfolio-v1','executionModel':'next-bar-open',
             'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY',
-            'krOneMinuteDataCollector':True,'oneMinuteExitReplayConnected':False,
+            'krOneMinuteDataCollector':True,'oneMinuteExitReplayConnected':True,
+            'oneMinutePathAmbiguityExplicit':True,
             'benchmarkSameCostModel':True,'liveMutation':False
         },
+        'reliability':{'watchdog':True,'updatePreflight':True,'automaticRollback':True,'rollbackTarget':'previous-git-commit'},
         'security':{'localhostBindExpected':True,'tailscaleProxyExpected':True},
         'krMarket':{
             'oneMinuteResearchCollector':True,'liveTransport':'NH WebSocket oc',
@@ -209,28 +216,20 @@ app.router.routes.extend([
     Route('/api/system/update',update_request,methods=['POST']),
     Route('/api/system/update/run',update_request,methods=['POST']),
     Route('/api/system/update/status',update_status),
-    Route('/api/system/ui-health',ui_health),
-    Route('/api/system/runtime-health',runtime_health),
-    Route('/api/strategy-lab/run',strategy_lab),
-    Route('/api/strategy-lab/exit',exit_lab),
-    Route('/api/research/market-lab',market_lab),
-    Route('/api/research/profitability',profitability_lab),
-    Route('/api/research/robust',robust_lab),
-    Route('/api/research/benchmark',benchmark_lab),
-    Route('/api/research/data-quality',quality_lab),
-    Route('/api/research/stocks-in-play',stocks_lab),
+    Route('/api/system/ui-health',ui_health),Route('/api/system/runtime-health',runtime_health),
+    Route('/api/strategy-lab/run',strategy_lab),Route('/api/strategy-lab/exit',exit_lab),
+    Route('/api/research/market-lab',market_lab),Route('/api/research/profitability',profitability_lab),
+    Route('/api/research/robust',robust_lab),Route('/api/research/benchmark',benchmark_lab),
+    Route('/api/research/data-quality',quality_lab),Route('/api/research/stocks-in-play',stocks_lab),
     Route('/api/research/scanner-intelligence',scanner_intelligence_state),
     Route('/api/research/decision-intelligence',decision_intelligence_state),
-    Route('/api/research/final',final_research),
-    Route('/api/research/status',research_state),
-    Route('/api/kr/research/1m/status',kr_1m_research_state),
-    Route('/api/us/research/status',us_research_state),
-    Route('/api/history/status',history_status),
-    Route('/api/history/start',history_start,methods=['POST']),
+    Route('/api/research/1m-exit-replay',one_minute_exit_replay_state),
+    Route('/api/research/final',final_research),Route('/api/research/status',research_state),
+    Route('/api/kr/research/1m/status',kr_1m_research_state),Route('/api/us/research/status',us_research_state),
+    Route('/api/history/status',history_status),Route('/api/history/start',history_start,methods=['POST']),
     Route('/api/history/stop',history_stop,methods=['POST']),
     Route('/styles.css',static_file),Route('/manifest.webmanifest',static_file),Route('/sw.js',static_file),
-    Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),
-    Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')
+    Mount('/js',app=StaticFiles(directory=ROOT_DIR/'js'),name='js'),Mount('/icons',app=StaticFiles(directory=ROOT_DIR/'icons'),name='icons')
 ])
 
 stocks_recorder_start()
