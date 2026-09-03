@@ -2,7 +2,7 @@
 Fast cache publishes Overnight/Strategy/Market results before heavy historical/PF research.
 Research only: never mutates Control/live rules and never sends orders.
 """
-import json,sqlite3,threading,time
+import json,os,sqlite3,threading,time
 from datetime import datetime
 from pathlib import Path
 from market_lab import run_market_lab
@@ -15,11 +15,18 @@ from stocks_in_play import scan as stocks_in_play_scan,snapshot_stats as stocks_
 from historical_accumulator import start as history_start,status as history_status
 from collector import DB_PATH,collector,regular_session
 
+
+def _env_int(name,default,minimum,maximum):
+    try:value=int(os.getenv(name,str(default)))
+    except (TypeError,ValueError):value=default
+    return max(minimum,min(value,maximum))
+
+
 OUT=Path(__file__).resolve().parent/'research_latest.json'
 _LOCK=threading.Lock();_OUT_LOCK=threading.Lock();_EXEC_LOCK=threading.Lock();_STARTED=False
 _STATE={
-    'running':False,'lastRun':None,'lastError':None,'intervalMin':60,
-    'historyAuto':True,'historyDays':60,'historyCodes':40,'historyMinIntervalMin':180,
+    'running':False,'lastRun':None,'lastError':None,'intervalMin':_env_int('RESEARCH_INTERVAL_MIN',60,30,360),
+    'historyAuto':True,'historyDays':60,'historyCodes':40,'historyMinIntervalMin':_env_int('HISTORY_MIN_INTERVAL_MIN',180,60,720),
     'lastHistoryStart':None,'phase':'idle','liveSessionPriority':True,
     'goodDataGate':True,'stocksInPlayResearch':True,'exitIntelligenceV2':True,
     'pullbackEntryResearch':True,'publicBenchmarkLab':True,
@@ -27,7 +34,8 @@ _STATE={
 }
 _FAST={
     'running':False,'lastRun':None,'lastError':None,'phase':'idle',
-    'intervalMin':30,'startupDelaySec':3,'liveSessionDeferred':True,
+    'intervalMin':_env_int('FAST_RESEARCH_INTERVAL_MIN',30,15,240),
+    'startupDelaySec':_env_int('FAST_RESEARCH_START_DELAY_SEC',3,0,600),'liveSessionDeferred':True,
     'overnightFirst':True,'progressivePublish':True
 }
 OVERNIGHT_STRATEGIES=('cross_trend_v2','cross_trend','orb_cross','orb_rvol')
