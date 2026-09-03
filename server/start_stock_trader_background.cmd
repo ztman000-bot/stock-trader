@@ -11,10 +11,10 @@ set "MIN_TRADE_PRICE=1000"
 set "MAX_SPREAD_PCT=0.25"
 set "MIN_INTRADAY_RANGE_PCT=0.50"
 
-rem Keep one independent watchdog alive. watchdog.py owns a Windows named mutex,
-rem so calling this launcher repeatedly will not create duplicate watchdogs.
+rem One Python watchdog only. pythonw has no console window and the watchdog owns
+rem a Windows named mutex, so repeated launcher calls cannot create duplicates.
 if not "%STOCK_TRADER_SKIP_WATCHDOG%"=="1" (
- start "" /b ".venv\Scripts\python.exe" watchdog.py >nul 2>&1
+ if exist ".venv\Scripts\pythonw.exe" start "" /b ".venv\Scripts\pythonw.exe" watchdog.py >nul 2>&1
 )
 
 netstat -ano | findstr /R /C:":8000 .*LISTENING" >nul 2>&1
@@ -33,16 +33,16 @@ set "RUNLOG=%TEMP%\stock_trader_server_%RANDOM%_%RANDOM%.log"
 echo [%date% %time%] Launching localhost-only uvicorn. log=%RUNLOG% >> "%BOOTLOG%"
 start "" /b ".venv\Scripts\python.exe" -m uvicorn unified_app:app --host 127.0.0.1 --port 8000 >> "%RUNLOG%" 2>&1
 for /L %%N in (1,1,30) do (
- powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 1; if($r.ok){exit 0}else{exit 1} } catch { exit 1 }" >nul 2>&1
+ ".venv\Scripts\python.exe" health_probe.py health >nul 2>&1
  if not errorlevel 1 goto :online
  timeout /t 1 /nobreak >nul
 )
 echo [%date% %time%] ERROR: health timeout. See %RUNLOG% >> "%BOOTLOG%"
 goto :done
 :online
-echo [%date% %time%] ONLINE localhost-only. scanner=180 focus=40 watchdog=enabled >> "%BOOTLOG%"
-rem Startup backfill is research work. Never compete with live KRX REST traffic.
-powershell -NoProfile -Command "$n=Get-Date; $m=$n.Hour*60+$n.Minute; if($n.DayOfWeek -notin @('Saturday','Sunday') -and $m -ge 540 -and $m -le 930){exit 0}; try { Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/market/backfill' -TimeoutSec 300 | Out-Null } catch {}" >nul 2>&1
+echo [%date% %time%] ONLINE localhost-only. scanner=180 focus=40 watchdog=pythonw >> "%BOOTLOG%"
+rem Best-effort after-hours research backfill. No PowerShell process is spawned.
+".venv\Scripts\python.exe" health_probe.py backfill-if-safe >nul 2>&1
 :done
 2>nul rmdir "%LOCKDIR%"
 endlocal
