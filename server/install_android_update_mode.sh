@@ -10,9 +10,14 @@ WATCHDOG="$SERVER/android_watchdog.sh"
 PIDFILE="$HOME/stock-trader-server.pid"
 WDPIDFILE="$HOME/stock-trader-watchdog.pid"
 
+env_has(){
+  local key="$1" value="$2"
+  grep -Eq "^${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$SERVER/.env"
+}
+
 cd "$SERVER"
-grep -q '^APP_MODE=paper$' .env || { echo 'SAFETY BLOCK: APP_MODE=paper 필요'; exit 1; }
-grep -q '^ENABLE_TRADING=false$' .env || { echo 'SAFETY BLOCK: ENABLE_TRADING=false 필요'; exit 1; }
+env_has APP_MODE paper || { echo 'SAFETY BLOCK: APP_MODE=paper 필요'; exit 1; }
+env_has ENABLE_TRADING false || { echo 'SAFETY BLOCK: ENABLE_TRADING=false 필요'; exit 1; }
 
 mkdir -p "$BOOTDIR"
 
@@ -25,7 +30,7 @@ sleep 20
 termux-wake-lock 2>/dev/null || true
 cd "$SERVER" || exit 1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stock Trader Android boot start" >> "$LOG"
-if ! grep -q '^APP_MODE=paper$' .env || ! grep -q '^ENABLE_TRADING=false$' .env; then
+if ! grep -Eq '^APP_MODE[[:space:]]*=[[:space:]]*paper[[:space:]]*$' .env || ! grep -Eq '^ENABLE_TRADING[[:space:]]*=[[:space:]]*false[[:space:]]*$' .env; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] SAFETY BLOCK" >> "$LOG"
   exit 1
 fi
@@ -49,7 +54,7 @@ PIDFILE="$HOME/stock-trader-server.pid"
 FAILS=0
 while true; do
   sleep 30
-  if ! grep -q '^APP_MODE=paper$' "$SERVER/.env" || ! grep -q '^ENABLE_TRADING=false$' "$SERVER/.env"; then
+  if ! grep -Eq '^APP_MODE[[:space:]]*=[[:space:]]*paper[[:space:]]*$' "$SERVER/.env" || ! grep -Eq '^ENABLE_TRADING[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$SERVER/.env"; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] SAFETY BLOCK" >> "$LOG"
     FAILS=0
     continue
