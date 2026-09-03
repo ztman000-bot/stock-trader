@@ -25,7 +25,9 @@ pkg install python git openssh termux-api
 python --version
 ```
 
-Python 3.10+ is required by the pinned NH PLUG SDK version.
+Python 3.10+ is required by the pinned NH PLUG SDK version. Python 3.13 is supported by this temporary profile.
+
+Do **not** run `python -m pip install --upgrade pip` on Termux. Use Termux's packaged pip as-is.
 
 ## 2. Clone the project
 
@@ -33,11 +35,19 @@ Python 3.10+ is required by the pinned NH PLUG SDK version.
 cd ~
 git clone https://github.com/ztman000-bot/stock-trader.git
 cd stock-trader/server
-python -m pip install --upgrade pip
 pip install -r requirements-android.txt
 ```
 
-`requirements-android.txt` intentionally uses plain `uvicorn` instead of `uvicorn[standard]` so optional native extensions are not required on Android.
+`requirements-android.txt` intentionally uses plain `uvicorn` instead of `uvicorn[standard]` so optional native extensions are not required on Android. It also pins Pydantic 1.10.25 for Python 3.13 so pip uses the universal pure-Python wheel instead of trying to build `pydantic-core`/`maturin` with Rust on Android.
+
+If an older checkout failed with `Failed to build pydantic-core`, update first and retry:
+
+```sh
+cd ~/stock-trader
+git pull --ff-only
+cd server
+pip install -r requirements-android.txt
+```
 
 ## 3. Create the phone-local `.env`
 
