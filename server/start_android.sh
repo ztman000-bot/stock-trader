@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 HOME=/data/data/com.termux/files/home
 WATCHDOG="$PWD/android_watchdog_v2.sh"
 WDPIDFILE="$HOME/stock-trader-watchdog.pid"
+SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
   echo "[ERROR] server/.env not found. Create it locally on the phone; never commit credentials."
@@ -48,7 +49,7 @@ watchdog_pid_valid(){
 
 # Every normal Android start also guarantees one watchdog process. Validate the
 # command line as well as PID liveness because Android may reuse stale PIDs.
-if [ "${ANDROID_SKIP_WATCHDOG:-0}" != "1" ] && [ -f "$WATCHDOG" ]; then
+if [ "$SKIP_WATCHDOG" != "1" ] && [ -f "$WATCHDOG" ]; then
   chmod +x "$WATCHDOG" 2>/dev/null || true
   WDPID=""
   [ -f "$WDPIDFILE" ] && WDPID=$(cat "$WDPIDFILE" 2>/dev/null || true)
@@ -58,6 +59,10 @@ if [ "${ANDROID_SKIP_WATCHDOG:-0}" != "1" ] && [ -f "$WATCHDOG" ]; then
     echo $! > "$WDPIDFILE"
   fi
 fi
+
+# ANDROID_SKIP_WATCHDOG is a launch-coordination flag only. Do not leak it into
+# uvicorn; otherwise the in-app guardian would stay disabled after update/recovery.
+unset ANDROID_SKIP_WATCHDOG
 
 echo "Stock Day Trader temporary Android server"
 echo "- Paper/research only"
