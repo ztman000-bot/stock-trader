@@ -14,3 +14,5 @@ server/stock_trader_server.log
 server/stock_trader_startup.log
 server/stock_trader_watchdog.log
 server/remote_update.log
+# Legacy Android installer generated this local file before watchdog v2 became tracked.
+server/android_watchdog.sh
