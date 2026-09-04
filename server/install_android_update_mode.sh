@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$HOME/stock-trader"
 SERVER="$ROOT/server"
+PREFIX=/data/data/com.termux/files/usr
 BOOTDIR="$HOME/.termux/boot"
 BOOT_SERVER="$BOOTDIR/10-stock-trader.sh"
 BOOT_WATCHDOG="$BOOTDIR/20-stock-trader-watchdog.sh"
