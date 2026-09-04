@@ -41,12 +41,38 @@ pid_alive(){
   [ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
+pid_cmdline(){
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true
+}
+
+is_server_pid(){
+  local p="${1:-}" cmd=""
+  pid_alive "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -qE 'python(3)? .*[-]m uvicorn android_unified_app:app|uvicorn android_unified_app:app'
+}
+
+is_watchdog_pid(){
+  local p="${1:-}" cmd=""
+  pid_alive "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -q 'android_watchdog_v2.sh'
+}
+
 server_pid(){
+  local p=""
   if [ -f "$SERVER_PIDFILE" ]; then
-    cat "$SERVER_PIDFILE" 2>/dev/null || true
-    return
+    p=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
+    if is_server_pid "$p"; then
+      echo "$p"
+      return
+    fi
+    rm -f "$SERVER_PIDFILE" 2>/dev/null || true
   fi
-  pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null | head -1 || true
+  p=$(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null | head -1 || true)
+  is_server_pid "$p" && echo "$p" || true
 }
 
 heartbeat_fresh(){
@@ -66,7 +92,20 @@ PY
 
 health_ok(){
   "$PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
-import json,urllib.request
+import json,time,urllib.request
+from datetime import datetime
+
+def age_seconds(value):
+    if not value:
+        return None
+    try:
+        dt=datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt=dt.astimezone()
+        return max(0.0, time.time()-dt.timestamp())
+    except Exception:
+        return None
+
 try:
     with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=8) as r:
         d=json.loads(r.read().decode('utf-8','ignore'))
@@ -76,10 +115,31 @@ try:
         raise SystemExit(2)
     if not d.get('credentialsConfigured'):
         raise SystemExit(3)
-    if d.get('autoPaper') and not (d.get('paperLoop') or {}).get('running'):
-        raise SystemExit(4)
-    if d.get('autoStartCollector') and not (d.get('collector') or {}).get('running'):
-        raise SystemExit(5)
+
+    paper=d.get('paperLoop') or {}
+    if d.get('autoPaper'):
+        if not paper.get('running'):
+            raise SystemExit(4)
+        paper_age=age_seconds(paper.get('lastCycleAt'))
+        started_age=age_seconds(paper.get('startedAt'))
+        if paper_age is None:
+            if started_age is None or started_age > 45:
+                raise SystemExit(6)
+        elif paper_age > 45:
+            raise SystemExit(6)
+
+    collector=d.get('collector') or {}
+    if d.get('autoStartCollector'):
+        if not collector.get('running'):
+            raise SystemExit(5)
+        cycle_age=age_seconds(collector.get('lastCycleAt'))
+        started_age=age_seconds(collector.get('startedAt'))
+        if cycle_age is None:
+            if started_age is None or started_age > 180:
+                raise SystemExit(7)
+        elif cycle_age > 180:
+            raise SystemExit(7)
+
     raise SystemExit(0)
 except SystemExit:
     raise
@@ -94,6 +154,21 @@ safe_env(){
   grep -Eq '^ENABLE_TRADING[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$SERVER/.env"
 }
 
+update_active(){
+  [ -f "$UPDATE_FLAG" ] || return 1
+  local upid="" started="" cmd=""
+  read -r upid started < "$UPDATE_FLAG" 2>/dev/null || true
+  if pid_alive "$upid"; then
+    cmd=$(pid_cmdline "$upid")
+    if echo "$cmd" | grep -q 'android_update.sh'; then
+      return 0
+    fi
+  fi
+  log "stale update flag removed pid=${upid:-none} started=${started:-unknown}"
+  rm -f "$UPDATE_FLAG" 2>/dev/null || true
+  return 1
+}
+
 cleanup(){
   local current=""
   [ -f "$PIDFILE" ] && current=$(cat "$PIDFILE" 2>/dev/null || true)
@@ -103,9 +178,10 @@ trap cleanup EXIT INT TERM
 
 if [ -f "$PIDFILE" ]; then
   old=$(cat "$PIDFILE" 2>/dev/null || true)
-  if pid_alive "$old" && [ "$old" != "$$" ]; then
+  if [ "$old" != "$$" ] && is_watchdog_pid "$old"; then
     exit 0
   fi
+  rm -f "$PIDFILE" 2>/dev/null || true
 fi
 echo $$ > "$PIDFILE"
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1 || true
@@ -114,7 +190,7 @@ log "watchdog-v2 started pid=$$ interval=${INTERVAL}s hard=${HARD_LIMIT} soft=${
 while true; do
   sleep "$INTERVAL"
 
-  if [ -f "$UPDATE_FLAG" ]; then
+  if update_active; then
     FAILS=0
     if [ "$UPDATE_LOGGED" = "0" ]; then
       log 'update in progress; watchdog restart actions paused'
@@ -142,7 +218,7 @@ while true; do
   FAILS=$((FAILS + 1))
   spid=$(server_pid)
   alive=0; fresh=0
-  pid_alive "$spid" && alive=1
+  is_server_pid "$spid" && alive=1
   heartbeat_fresh && fresh=1
   limit="$HARD_LIMIT"
   if [ "$alive" = "1" ] && [ "$fresh" = "1" ]; then

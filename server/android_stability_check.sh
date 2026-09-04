@@ -16,10 +16,25 @@ ok(){ echo "[OK] $*"; }
 warn(){ echo "[WARN] $*"; }
 fail(){ echo "[FAIL] $*"; RC=1; }
 
-pid_state(){
-  local label="$1" file="$2" pid=""
-  if [ -f "$file" ]; then pid=$(cat "$file" 2>/dev/null || true); fi
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then ok "$label PID=$pid alive"; else fail "$label not alive (pid=${pid:-none})"; fi
+pid_cmdline(){
+  local pid="${1:-}"
+  [ -n "$pid" ] || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
+server_state(){
+  local pid="" cmd=""
+  [ -f "$SERVER_PIDFILE" ] && pid=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    fail "server not alive (pid=${pid:-none})"
+    return
+  fi
+  cmd=$(pid_cmdline "$pid")
+  if echo "$cmd" | grep -q 'uvicorn android_unified_app:app'; then
+    ok "server PID=$pid alive and identity verified"
+  else
+    fail "server PID=$pid is alive but points to an unexpected process"
+  fi
 }
 
 watchdog_state(){
@@ -29,7 +44,7 @@ watchdog_state(){
     fail "watchdog not alive (pid=${pid:-none})"
     return
   fi
-  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  cmd=$(pid_cmdline "$pid")
   if echo "$cmd" | grep -q 'android_watchdog_v2.sh'; then
     ok "watchdog v2 PID=$pid alive"
   elif echo "$cmd" | grep -q 'android_watchdog.sh'; then
@@ -54,29 +69,45 @@ else
 fi
 
 echo
-echo "[2] Server health"
+echo "[2] Server health / loop liveness"
 "$PREFIX/bin/python" - <<'PY'
-import json,urllib.request
+import json,time,urllib.request
+from datetime import datetime
+
+def age(value):
+    if not value:
+        return None
+    try:
+        d=datetime.fromisoformat(str(value))
+        if d.tzinfo is None:d=d.astimezone()
+        return max(0.0,time.time()-d.timestamp())
+    except Exception:return None
+
 try:
     with urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=8) as r:
         d=json.loads(r.read().decode('utf-8','ignore'))
     c=d.get('collector') or {}; p=d.get('paperLoop') or {}; h=d.get('historical') or {}; u=d.get('usCollector') or {}
+    ca=age(c.get('lastCycleAt')); pa=age(p.get('lastCycleAt'))
     print(f"HTTP={r.status} ok={d.get('ok')} mode={d.get('mode')} tradingEnabled={d.get('tradingEnabled')} credentials={d.get('credentialsConfigured')}")
-    print(f"collector.running={c.get('running')} lastSuccessAt={c.get('lastSuccessAt')} lastError={c.get('lastError')}")
-    print(f"paper.running={p.get('running')} lastCycleAt={p.get('lastCycleAt')} lastError={p.get('lastError')}")
+    print(f"collector.running={c.get('running')} cycleAgeSec={None if ca is None else round(ca,1)} lastSuccessAt={c.get('lastSuccessAt')} lastError={c.get('lastError')}")
+    print(f"paper.running={p.get('running')} cycleAgeSec={None if pa is None else round(pa,1)} lastError={p.get('lastError')}")
     print(f"historical.running={h.get('running')} jobs={h.get('completedJobs')}/{h.get('totalJobs')} failed={h.get('failedJobs')} lastError={h.get('lastError')}")
     print(f"usCollector.running={u.get('running')} lastError={u.get('lastError')}")
-    healthy=(r.status==200 and d.get('ok') and str(d.get('mode','')).lower()=='paper' and not d.get('tradingEnabled') and d.get('credentialsConfigured') and (not d.get('autoPaper') or p.get('running')) and (not d.get('autoStartCollector') or c.get('running')))
+    healthy=(r.status==200 and d.get('ok') and str(d.get('mode','')).lower()=='paper' and not d.get('tradingEnabled') and d.get('credentialsConfigured'))
+    if d.get('autoPaper'):
+        healthy=healthy and bool(p.get('running')) and pa is not None and pa<=45
+    if d.get('autoStartCollector'):
+        healthy=healthy and bool(c.get('running')) and ca is not None and ca<=180
     raise SystemExit(0 if healthy else 1)
 except Exception as e:
     print('health_error='+repr(e))
     raise SystemExit(1)
 PY
-[ "$?" = "0" ] && ok 'deep health passed' || fail 'deep health failed'
+[ "$?" = "0" ] && ok 'deep health and loop liveness passed' || fail 'deep health / loop liveness failed'
 
 echo
 echo "[3] Process supervision"
-pid_state 'server' "$SERVER_PIDFILE"
+server_state
 watchdog_state
 if [ -f "$HEARTBEAT" ]; then
   AGE=$("$PREFIX/bin/python" - "$HEARTBEAT" <<'PY'
@@ -99,6 +130,8 @@ if [ -n "$WDJSON" ]; then
   echo "$WDJSON"
   echo "$WDJSON" | grep -q '"watchdogV2":true' && ok 'watchdog API confirms v2' || fail 'watchdog API does not confirm v2'
   echo "$WDJSON" | grep -q '"heartbeatFresh":true' && ok 'watchdog API heartbeat fresh' || fail 'watchdog API heartbeat not fresh'
+  echo "$WDJSON" | grep -q '"serverPidValid":true' && ok 'watchdog API confirms server PID identity' || fail 'watchdog API server PID identity invalid'
+  echo "$WDJSON" | grep -q '"guardianActive":true' && ok 'in-app watchdog guardian active' || fail 'in-app watchdog guardian inactive'
 else
   fail 'watchdog status endpoint unavailable'
 fi
@@ -106,6 +139,12 @@ fi
 echo
 echo "[5] Storage / database"
 df -h "$HOME" 2>/dev/null | tail -1 || true
+FREE_KB=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}' || true)
+if [ -n "${FREE_KB:-}" ] && [ "$FREE_KB" -lt 524288 ]; then
+  warn "free storage below 512MB (${FREE_KB}KB) — database/log growth risk"
+else
+  ok 'free storage is above 512MB'
+fi
 if [ -f "$DB" ]; then
   ls -lh "$DB"
   DBCHK=$("$PREFIX/bin/python" - "$DB" <<'PY'

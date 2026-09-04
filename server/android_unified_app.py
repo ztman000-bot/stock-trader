@@ -23,6 +23,8 @@ SERVER_PIDFILE = Path.home() / 'stock-trader-server.pid'
 UPDATE_FLAG = Path.home() / '.stock-trader-update-in-progress'
 _HEARTBEAT_STARTED = False
 _HEARTBEAT_LOCK = threading.Lock()
+_WATCHDOG_GUARDIAN_STARTED = False
+_WATCHDOG_GUARDIAN_LOCK = threading.Lock()
 
 # unified_app keeps the Windows updater for laptop use. On Android we replace
 # only the update POST routes; every trading/research route remains unchanged.
@@ -67,12 +69,11 @@ def _pid_cmdline(pid):
 
 
 def _ensure_watchdog():
-    """Migrate any legacy generated watchdog to the tracked v2 supervisor.
+    """Ensure exactly the tracked watchdog v2 is supervised by this app.
 
-    This also makes the first in-app update migration-safe: an older updater can
-    restart the new application, and the new application then activates v2.
-    Newer android_update.sh sets ANDROID_SKIP_WATCHDOG=1 while replacing the
-    server and refreshes v2 itself after health verification.
+    PID liveness alone is insufficient on Android because a stale PID can be
+    reused by an unrelated process. Command-line identity is verified before a
+    process is trusted or terminated.
     """
     if os.name == 'nt' or os.getenv('ANDROID_SKIP_WATCHDOG') == '1':
         return
@@ -114,6 +115,31 @@ def _ensure_watchdog():
         WATCHDOG_PIDFILE.write_text(str(proc.pid), encoding='utf-8')
     except Exception:
         pass
+
+
+def _watchdog_guardian_loop():
+    while True:
+        time.sleep(60)
+        try:
+            _ensure_watchdog()
+        except Exception:
+            # Supervision must never take the API process down.
+            pass
+
+
+def _start_watchdog_guardian():
+    global _WATCHDOG_GUARDIAN_STARTED
+    if os.name == 'nt' or os.getenv('ANDROID_SKIP_WATCHDOG') == '1':
+        return
+    with _WATCHDOG_GUARDIAN_LOCK:
+        if _WATCHDOG_GUARDIAN_STARTED:
+            return
+        _WATCHDOG_GUARDIAN_STARTED = True
+        threading.Thread(
+            target=_watchdog_guardian_loop,
+            name='android-watchdog-guardian',
+            daemon=True,
+        ).start()
 
 
 def _write_heartbeat():
@@ -237,6 +263,7 @@ def android_watchdog_status(request):
     wd_pid = _read_pid(WATCHDOG_PIDFILE)
     server_pid = _read_pid(SERVER_PIDFILE)
     wd_cmd = _pid_cmdline(wd_pid) if _pid_alive(wd_pid) else ''
+    server_cmd = _pid_cmdline(server_pid) if _pid_alive(server_pid) else ''
     heartbeat = None
     heartbeat_age = None
     try:
@@ -249,9 +276,11 @@ def android_watchdog_status(request):
         'platform': 'android-termux',
         'serverPid': server_pid,
         'serverPidAlive': _pid_alive(server_pid),
+        'serverPidValid': 'uvicorn android_unified_app:app' in server_cmd,
         'watchdogPid': wd_pid,
         'watchdogAlive': _pid_alive(wd_pid),
         'watchdogV2': 'android_watchdog_v2.sh' in wd_cmd,
+        'guardianActive': _WATCHDOG_GUARDIAN_STARTED,
         'heartbeatAgeSec': heartbeat_age,
         'heartbeatFresh': heartbeat_age is not None and heartbeat_age <= 90,
         'updateInProgress': UPDATE_FLAG.exists(),
@@ -264,6 +293,7 @@ def android_watchdog_status(request):
 
 _start_heartbeat()
 _ensure_watchdog()
+_start_watchdog_guardian()
 
 app.router.routes.extend([
     Route('/api/system/update', android_update_request, methods=['POST']),
