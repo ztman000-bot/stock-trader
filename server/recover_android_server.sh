@@ -9,6 +9,12 @@ PIDFILE="$HOME/stock-trader-server.pid"
 HEARTBEAT="$HOME/.stock-trader-app-heartbeat"
 UPDATE_FLAG="$HOME/.stock-trader-update-in-progress"
 MAX_LOG_BYTES="${SERVER_MAX_LOG_BYTES:-8388608}"
+FORCE_RESTART=0
+for arg in "$@"; do
+  case "$arg" in
+    --force|--restart) FORCE_RESTART=1 ;;
+  esac
+done
 
 rotate_log(){
   [ -f "$LOG" ] || return 0
@@ -118,9 +124,12 @@ except Exception:
 PY
 }
 
-if health_ok; then
+if [ "$FORCE_RESTART" != "1" ] && health_ok; then
   echo '[OK] Android Stock Trader server is already healthy.'
   exit 0
+fi
+if [ "$FORCE_RESTART" = "1" ]; then
+  echo '[INFO] Forced safe restart requested.'
 fi
 
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
