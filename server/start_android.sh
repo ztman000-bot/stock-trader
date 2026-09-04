@@ -39,13 +39,21 @@ fi
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 ulimit -n 4096 >/dev/null 2>&1 || true
 
-# Every normal Android start also guarantees one watchdog process. The watchdog
-# has its own single-instance PID guard, so recovery/reboot cannot duplicate it.
+watchdog_pid_valid(){
+  local pid="${1:-}" cmd=""
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  echo "$cmd" | grep -q 'android_watchdog_v2.sh'
+}
+
+# Every normal Android start also guarantees one watchdog process. Validate the
+# command line as well as PID liveness because Android may reuse stale PIDs.
 if [ "${ANDROID_SKIP_WATCHDOG:-0}" != "1" ] && [ -f "$WATCHDOG" ]; then
   chmod +x "$WATCHDOG" 2>/dev/null || true
   WDPID=""
   [ -f "$WDPIDFILE" ] && WDPID=$(cat "$WDPIDFILE" 2>/dev/null || true)
-  if [ -z "$WDPID" ] || ! kill -0 "$WDPID" 2>/dev/null; then
+  if ! watchdog_pid_valid "$WDPID"; then
+    rm -f "$WDPIDFILE" 2>/dev/null || true
     nohup "$WATCHDOG" >/dev/null 2>&1 &
     echo $! > "$WDPIDFILE"
   fi
