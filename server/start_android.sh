@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 HOME=/data/data/com.termux/files/home
-WATCHDOG="$PWD/android_watchdog.sh"
+WATCHDOG="$PWD/android_watchdog_v2.sh"
 WDPIDFILE="$HOME/stock-trader-watchdog.pid"
 
 if [ ! -f ".env" ]; then
@@ -56,7 +56,7 @@ echo "- Paper/research only"
 echo "- REAL ORDER forced OFF"
 echo "- Dedicated phone performance profile: $PHONE_PERFORMANCE_PROFILE"
 echo "- Realtime/API first, heavy research staggered"
-echo "- Android watchdog + safe updater enabled"
+echo "- Android watchdog v2 + safe updater enabled"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
 
 # Keep one worker only. Multiple workers would duplicate collectors/research engines and NH sessions.
