@@ -18,6 +18,13 @@ env_has(){
   grep -Eq "^${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$SERVER/.env"
 }
 
+watchdog_pid_valid(){
+  local pid="${1:-}" cmd=""
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  echo "$cmd" | grep -q 'android_watchdog_v2.sh'
+}
+
 cd "$SERVER"
 env_has APP_MODE paper || { echo 'SAFETY BLOCK: APP_MODE=paper 필요'; exit 1; }
 env_has ENABLE_TRADING false || { echo 'SAFETY BLOCK: ENABLE_TRADING=false 필요'; exit 1; }
@@ -61,10 +68,13 @@ if [ -f "$PIDFILE" ]; then
       echo "[$(date '+%Y-%m-%d %H:%M:%S')] Watchdog v2 already running PID=$PID" >> "$LOG"
       exit 0
     fi
-    kill -TERM "$PID" 2>/dev/null || true
-    sleep 1
+    if echo "$CMD" | grep -q 'android_watchdog.sh'; then
+      kill -TERM "$PID" 2>/dev/null || true
+      sleep 1
+    fi
   fi
 fi
+rm -f "$PIDFILE" 2>/dev/null || true
 nohup "$WATCHDOG" >/dev/null 2>&1 &
 echo $! > "$PIDFILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Watchdog v2 started PID=$!" >> "$LOG"
@@ -72,14 +82,23 @@ EOF
 chmod +x "$BOOT_WATCHDOG"
 
 # Refresh watchdog now so the running process uses watchdog v2, replacing any
-# legacy generated android_watchdog.sh process that may still be alive.
+# legacy generated android_watchdog.sh process that may still be alive. Never
+# terminate an unrelated process merely because Android reused a stale PID.
 if [ -f "$WDPIDFILE" ]; then
   WDPID=$(cat "$WDPIDFILE" 2>/dev/null || true)
-  if [ -n "${WDPID:-}" ] && kill -0 "$WDPID" 2>/dev/null; then
+  if watchdog_pid_valid "$WDPID"; then
     kill -TERM "$WDPID" 2>/dev/null || true
     sleep 1
+  else
+    CMD=""
+    [ -n "${WDPID:-}" ] && CMD=$(tr '\0' ' ' < "/proc/$WDPID/cmdline" 2>/dev/null || true)
+    if echo "$CMD" | grep -q 'android_watchdog.sh'; then
+      kill -TERM "$WDPID" 2>/dev/null || true
+      sleep 1
+    fi
   fi
 fi
+rm -f "$WDPIDFILE" 2>/dev/null || true
 nohup "$WATCHDOG" >/dev/null 2>&1 &
 echo $! > "$WDPIDFILE"
 NEW_WD=$!
