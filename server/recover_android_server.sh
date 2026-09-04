@@ -10,21 +10,6 @@ HEARTBEAT="$HOME/.stock-trader-app-heartbeat"
 UPDATE_FLAG="$HOME/.stock-trader-update-in-progress"
 MAX_LOG_BYTES="${SERVER_MAX_LOG_BYTES:-8388608}"
 
-cd "$SERVER"
-
-if [ ! -f .env ]; then
-  echo "[ERROR] $SERVER/.env not found"
-  exit 10
-fi
-
-grep -Eq '^APP_MODE[[:space:]]*=[[:space:]]*paper[[:space:]]*$' .env || { echo '[ERROR] APP_MODE=paper not verified'; exit 11; }
-grep -Eq '^ENABLE_TRADING[[:space:]]*=[[:space:]]*false[[:space:]]*$' .env || { echo '[ERROR] ENABLE_TRADING=false not verified'; exit 12; }
-
-if [ -f "$UPDATE_FLAG" ]; then
-  echo '[INFO] Android update is in progress; recovery is deferred.'
-  exit 30
-fi
-
 rotate_log(){
   [ -f "$LOG" ] || return 0
   local size
@@ -52,6 +37,40 @@ is_server_pid(){
   cmd=$(pid_cmdline "$p")
   echo "$cmd" | grep -qE 'python(3)? .*[-]m uvicorn android_unified_app:app|uvicorn android_unified_app:app'
 }
+
+is_update_pid(){
+  local p="${1:-}" cmd=""
+  pid_alive "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -q 'android_update.sh'
+}
+
+update_active(){
+  [ -f "$UPDATE_FLAG" ] || return 1
+  local upid="" started=""
+  read -r upid started < "$UPDATE_FLAG" 2>/dev/null || true
+  if is_update_pid "$upid"; then
+    return 0
+  fi
+  echo "[WARN] stale/unrelated update flag removed (pid=${upid:-none}, started=${started:-unknown})"
+  rm -f "$UPDATE_FLAG" 2>/dev/null || true
+  return 1
+}
+
+cd "$SERVER"
+
+if [ ! -f .env ]; then
+  echo "[ERROR] $SERVER/.env not found"
+  exit 10
+fi
+
+grep -Eq '^APP_MODE[[:space:]]*=[[:space:]]*paper[[:space:]]*$' .env || { echo '[ERROR] APP_MODE=paper not verified'; exit 11; }
+grep -Eq '^ENABLE_TRADING[[:space:]]*=[[:space:]]*false[[:space:]]*$' .env || { echo '[ERROR] ENABLE_TRADING=false not verified'; exit 12; }
+
+if update_active; then
+  echo '[INFO] Android update is in progress; recovery is deferred.'
+  exit 30
+fi
 
 health_ok(){
   "$PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
