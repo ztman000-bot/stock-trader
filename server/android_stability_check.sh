@@ -22,6 +22,23 @@ pid_state(){
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then ok "$label PID=$pid alive"; else fail "$label not alive (pid=${pid:-none})"; fi
 }
 
+watchdog_state(){
+  local pid="" cmd=""
+  [ -f "$WDPIDFILE" ] && pid=$(cat "$WDPIDFILE" 2>/dev/null || true)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    fail "watchdog not alive (pid=${pid:-none})"
+    return
+  fi
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  if echo "$cmd" | grep -q 'android_watchdog_v2.sh'; then
+    ok "watchdog v2 PID=$pid alive"
+  elif echo "$cmd" | grep -q 'android_watchdog.sh'; then
+    fail "legacy watchdog still running PID=$pid — run install_android_update_mode.sh once"
+  else
+    fail "watchdog PID=$pid points to unexpected process"
+  fi
+}
+
 echo "=== Stock Trader Android Stability Check ==="
 echo "time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "repo: $ROOT"
@@ -60,7 +77,7 @@ PY
 echo
 echo "[3] Process supervision"
 pid_state 'server' "$SERVER_PIDFILE"
-pid_state 'watchdog' "$WDPIDFILE"
+watchdog_state
 if [ -f "$HEARTBEAT" ]; then
   AGE=$("$PREFIX/bin/python" - "$HEARTBEAT" <<'PY'
 import json,sys,time
@@ -76,7 +93,18 @@ fi
 [ -f "$UPDATE_FLAG" ] && warn 'update flag is present' || ok 'no update in progress'
 
 echo
-echo "[4] Storage / database"
+echo "[4] Watchdog API"
+WDJSON=$(curl -fsS --max-time 8 http://127.0.0.1:8000/api/system/android-watchdog 2>/dev/null || true)
+if [ -n "$WDJSON" ]; then
+  echo "$WDJSON"
+  echo "$WDJSON" | grep -q '"watchdogV2":true' && ok 'watchdog API confirms v2' || fail 'watchdog API does not confirm v2'
+  echo "$WDJSON" | grep -q '"heartbeatFresh":true' && ok 'watchdog API heartbeat fresh' || fail 'watchdog API heartbeat not fresh'
+else
+  fail 'watchdog status endpoint unavailable'
+fi
+
+echo
+echo "[5] Storage / database"
 df -h "$HOME" 2>/dev/null | tail -1 || true
 if [ -f "$DB" ]; then
   ls -lh "$DB"
@@ -93,7 +121,7 @@ else
 fi
 
 echo
-echo "[5] Recent supervision logs"
+echo "[6] Recent supervision logs"
 echo "-- watchdog --"; tail -n 8 "$HOME/stock-trader-watchdog.log" 2>/dev/null || true
 echo "-- server --"; tail -n 8 "$HOME/stock-trader-server.log" 2>/dev/null || true
 
