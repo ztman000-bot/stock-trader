@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -15,6 +16,7 @@ app = base.app
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ANDROID_UPDATE_SCRIPT = BASE_DIR / 'android_update.sh'
+ANDROID_WATCHDOG = BASE_DIR / 'android_watchdog_v2.sh'
 HEARTBEAT = Path.home() / '.stock-trader-app-heartbeat'
 WATCHDOG_PIDFILE = Path.home() / 'stock-trader-watchdog.pid'
 SERVER_PIDFILE = Path.home() / 'stock-trader-server.pid'
@@ -54,6 +56,64 @@ def _read_pid(path):
         return int(path.read_text(encoding='utf-8').strip())
     except Exception:
         return None
+
+
+def _pid_cmdline(pid):
+    try:
+        raw = Path(f'/proc/{int(pid)}/cmdline').read_bytes()
+        return raw.replace(b'\x00', b' ').decode('utf-8', 'ignore')
+    except Exception:
+        return ''
+
+
+def _ensure_watchdog():
+    """Migrate any legacy generated watchdog to the tracked v2 supervisor.
+
+    This also makes the first in-app update migration-safe: an older updater can
+    restart the new application, and the new application then activates v2.
+    Newer android_update.sh sets ANDROID_SKIP_WATCHDOG=1 while replacing the
+    server and refreshes v2 itself after health verification.
+    """
+    if os.name == 'nt' or os.getenv('ANDROID_SKIP_WATCHDOG') == '1':
+        return
+    if not _android_safety_ok() or not ANDROID_WATCHDOG.exists():
+        return
+
+    old_pid = _read_pid(WATCHDOG_PIDFILE)
+    if _pid_alive(old_pid):
+        cmd = _pid_cmdline(old_pid)
+        if 'android_watchdog_v2.sh' in cmd:
+            return
+        # Only terminate the known legacy project watchdog. Never kill an
+        # unrelated process if Android has reused a stale PID.
+        if 'android_watchdog.sh' in cmd:
+            try:
+                os.kill(old_pid, signal.SIGTERM)
+                for _ in range(10):
+                    if not _pid_alive(old_pid):
+                        break
+                    time.sleep(0.2)
+            except Exception:
+                pass
+    try:
+        WATCHDOG_PIDFILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    try:
+        ANDROID_WATCHDOG.chmod(0o755)
+        proc = subprocess.Popen(
+            ['/data/data/com.termux/files/usr/bin/bash', str(ANDROID_WATCHDOG)],
+            cwd=str(BASE_DIR),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        WATCHDOG_PIDFILE.write_text(str(proc.pid), encoding='utf-8')
+    except Exception:
+        pass
 
 
 def _write_heartbeat():
@@ -176,6 +236,7 @@ def android_watchdog_status(request):
     now = time.time()
     wd_pid = _read_pid(WATCHDOG_PIDFILE)
     server_pid = _read_pid(SERVER_PIDFILE)
+    wd_cmd = _pid_cmdline(wd_pid) if _pid_alive(wd_pid) else ''
     heartbeat = None
     heartbeat_age = None
     try:
@@ -190,6 +251,7 @@ def android_watchdog_status(request):
         'serverPidAlive': _pid_alive(server_pid),
         'watchdogPid': wd_pid,
         'watchdogAlive': _pid_alive(wd_pid),
+        'watchdogV2': 'android_watchdog_v2.sh' in wd_cmd,
         'heartbeatAgeSec': heartbeat_age,
         'heartbeatFresh': heartbeat_age is not None and heartbeat_age <= 90,
         'updateInProgress': UPDATE_FLAG.exists(),
@@ -201,6 +263,7 @@ def android_watchdog_status(request):
 
 
 _start_heartbeat()
+_ensure_watchdog()
 
 app.router.routes.extend([
     Route('/api/system/update', android_update_request, methods=['POST']),
