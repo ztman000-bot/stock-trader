@@ -35,17 +35,62 @@ rotate_log(){
   fi
 }
 
+pid_alive(){
+  local p="${1:-}"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+pid_cmdline(){
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true
+}
+
+is_server_pid(){
+  local p="${1:-}" cmd=""
+  pid_alive "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -qE 'python(3)? .*[-]m uvicorn android_unified_app:app|uvicorn android_unified_app:app'
+}
+
 health_ok(){
   "$PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
-import json,urllib.request
+import json,time,urllib.request
+from datetime import datetime
+
+def age_seconds(value):
+    if not value:
+        return None
+    try:
+        dt=datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt=dt.astimezone()
+        return max(0.0, time.time()-dt.timestamp())
+    except Exception:
+        return None
+
 try:
     with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=8) as r:
         d=json.loads(r.read().decode('utf-8','ignore'))
     if r.status != 200 or not d.get('ok'): raise SystemExit(1)
     if str(d.get('mode','')).lower() != 'paper' or bool(d.get('tradingEnabled')): raise SystemExit(2)
     if not d.get('credentialsConfigured'): raise SystemExit(3)
-    if d.get('autoPaper') and not (d.get('paperLoop') or {}).get('running'): raise SystemExit(4)
-    if d.get('autoStartCollector') and not (d.get('collector') or {}).get('running'): raise SystemExit(5)
+    paper=d.get('paperLoop') or {}
+    if d.get('autoPaper'):
+        if not paper.get('running'): raise SystemExit(4)
+        age=age_seconds(paper.get('lastCycleAt'))
+        started=age_seconds(paper.get('startedAt'))
+        if age is None:
+            if started is None or started > 45: raise SystemExit(6)
+        elif age > 45: raise SystemExit(6)
+    collector=d.get('collector') or {}
+    if d.get('autoStartCollector'):
+        if not collector.get('running'): raise SystemExit(5)
+        age=age_seconds(collector.get('lastCycleAt'))
+        started=age_seconds(collector.get('startedAt'))
+        if age is None:
+            if started is None or started > 180: raise SystemExit(7)
+        elif age > 180: raise SystemExit(7)
     raise SystemExit(0)
 except SystemExit:
     raise
@@ -62,20 +107,29 @@ fi
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 rotate_log
 
-# Terminate every matching Android uvicorn process. A process can still exist
-# while /api/health is hung, so PID-alive alone is not treated as healthy.
+# Terminate only validated Stock Trader uvicorn processes. Android can reuse a
+# stale PID, so a PID file alone is never permission to kill a process.
 PIDS=""
-if [ -f "$PIDFILE" ]; then PIDS="$(cat "$PIDFILE" 2>/dev/null || true)"; fi
+if [ -f "$PIDFILE" ]; then
+  SAVED="$(cat "$PIDFILE" 2>/dev/null || true)"
+  if is_server_pid "$SAVED"; then
+    PIDS="$SAVED"
+  else
+    rm -f "$PIDFILE" 2>/dev/null || true
+  fi
+fi
 MATCHED=$(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null || true)
-PIDS=$(printf '%s\n%s\n' "$PIDS" "$MATCHED" | awk 'NF && !seen[$1]++ {print $1}')
+for p in $MATCHED; do
+  is_server_pid "$p" && PIDS=$(printf '%s\n%s\n' "$PIDS" "$p" | awk 'NF && !seen[$1]++ {print $1}')
+done
 for p in $PIDS; do kill -TERM "$p" 2>/dev/null || true; done
 for _ in $(seq 1 10); do
   any=0
-  for p in $PIDS; do kill -0 "$p" 2>/dev/null && any=1 || true; done
+  for p in $PIDS; do is_server_pid "$p" && any=1 || true; done
   [ "$any" = "0" ] && break
   sleep 1
 done
-for p in $PIDS; do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null || true; done
+for p in $PIDS; do is_server_pid "$p" && kill -KILL "$p" 2>/dev/null || true; done
 sleep 2
 rm -f "$HEARTBEAT"
 
