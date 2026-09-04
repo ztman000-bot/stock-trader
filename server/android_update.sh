@@ -10,7 +10,7 @@ WDPIDFILE="$HOME/stock-trader-watchdog.pid"
 UPDATE_FLAG="$HOME/.stock-trader-update-in-progress"
 LOG="$HOME/stock-trader-update.log"
 SERVER_LOG="$HOME/stock-trader-server.log"
-WATCHDOG="$SERVER/android_watchdog.sh"
+WATCHDOG="$SERVER/android_watchdog_v2.sh"
 OLD_HEAD=""
 NEWPID=""
 OLD_STOPPED=0
@@ -114,7 +114,7 @@ restart_watchdog(){
   fi
   nohup "$WATCHDOG" >/dev/null 2>&1 &
   echo $! > "$WDPIDFILE"
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] watchdog refreshed PID=$!"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] watchdog v2 refreshed PID=$!"
 }
 
 rollback_and_restart(){
@@ -189,7 +189,7 @@ if ! git diff --quiet "$OLD_HEAD" HEAD -- server/requirements-android.txt; then
 fi
 
 cd "$SERVER"
-chmod +x start_android.sh recover_android_server.sh android_watchdog.sh android_stability_check.sh 2>/dev/null || true
+chmod +x start_android.sh recover_android_server.sh android_watchdog_v2.sh android_stability_check.sh 2>/dev/null || true
 "$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py || rollback_and_restart
 "$PREFIX/bin/python" preflight.py || rollback_and_restart
 env_has APP_MODE paper || rollback_and_restart
