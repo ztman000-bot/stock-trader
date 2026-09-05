@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from collector import DB_PATH,FOCUS_SIZE,PROTECTED_CODES,active_candidates,bars,candidate_meta,collector,instrument_meta,is_safe_code,latest_quotes,universe_verified
+from research_observer import record_scan_observations
 KST=__import__('zoneinfo').ZoneInfo('Asia/Seoul')
 INITIAL_CAPITAL=10_000_000.0;RISK_PER_TRADE=.0035;STOP_PCT=.010;TRAIL_ACTIVATE_PCT=.015;TRAIL_PCT=.008;BREAKEVEN_ACTIVATE_PCT=.008
 MAX_CONSECUTIVE_LOSSES=2;MAX_OPEN_POSITIONS=2;MAX_DAILY_TRADES=8;DAILY_MAX_LOSS_PCT=.0075;MIN_BARS=35;MIN_SESSION_BARS=6;BUY_SCORE=78
@@ -15,7 +16,7 @@ def init_paper_db():
  with _conn() as c:
   c.executescript('''CREATE TABLE IF NOT EXISTS paper_trades(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT NOT NULL,entry_at TEXT NOT NULL,entry_price REAL NOT NULL,qty INTEGER NOT NULL,score REAL NOT NULL,reasons TEXT,exit_at TEXT,exit_price REAL,exit_reason TEXT,pnl REAL,pnl_pct REAL,status TEXT NOT NULL DEFAULT 'OPEN',peak_price REAL);CREATE TABLE IF NOT EXISTS paper_state(key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE IF NOT EXISTS paper_signals(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT NOT NULL,at TEXT NOT NULL,score REAL NOT NULL,action TEXT NOT NULL,reasons TEXT,shadow INTEGER NOT NULL DEFAULT 0);''')
   cols={r['name'] for r in c.execute('PRAGMA table_info(paper_trades)')}
-  additions={'peak_price':'REAL','trough_price':'REAL','entry_snapshot':'TEXT','mfe_pct':'REAL','mae_pct':'REAL','failure_type':'TEXT'}
+  additions={'peak_price':'REAL','trough_price':'REAL','entry_snapshot':'TEXT','mfe_pct':'REAL','mae_pct':'REAL','failure_type':'TEXT','entry_sequence':'INTEGER'}
   for n,t in additions.items():
    if n not in cols:c.execute(f'ALTER TABLE paper_trades ADD COLUMN {n} {t}')
 def _state_set(key,value):
@@ -61,12 +62,14 @@ def indicators(code):
 def _today_prefix():return datetime.now(KST).date().isoformat()
 def daily_stats():
  init_paper_db()
- with _conn() as c:closed=c.execute("SELECT * FROM paper_trades WHERE status='CLOSED' AND exit_at LIKE ? ORDER BY id",(_today_prefix()+'%',)).fetchall()
+ with _conn() as c:
+  closed=c.execute("SELECT * FROM paper_trades WHERE status='CLOSED' AND exit_at LIKE ? ORDER BY id",(_today_prefix()+'%',)).fetchall()
+  entries=int(c.execute("SELECT COUNT(*) n FROM paper_trades WHERE entry_at LIKE ?",(_today_prefix()+'%',)).fetchone()['n'])
  pnl=sum(float(r['pnl'] or 0) for r in closed);con=0
  for r in reversed(closed):
   if float(r['pnl'] or 0)<0:con+=1
   else:break
- unresolved=_state_json('eod_unresolved',{}) or {};ll=-INITIAL_CAPITAL*DAILY_MAX_LOSS_PCT;return {'date':_today_prefix(),'closedTrades':len(closed),'pnl':round(pnl,2),'consecutiveLosses':con,'lossLimit':round(ll,2),'lossLimitHit':pnl<=ll,'maxDailyTrades':MAX_DAILY_TRADES,'locked':con>=MAX_CONSECUTIVE_LOSSES or pnl<=ll or len(closed)>=MAX_DAILY_TRADES,'eodUnresolved':unresolved}
+ unresolved=_state_json('eod_unresolved',{}) or {};ll=-INITIAL_CAPITAL*DAILY_MAX_LOSS_PCT;return {'date':_today_prefix(),'entriesToday':entries,'closedTrades':len(closed),'pnl':round(pnl,2),'consecutiveLosses':con,'lossLimit':round(ll,2),'lossLimitHit':pnl<=ll,'maxDailyTrades':MAX_DAILY_TRADES,'entryLimitSemantics':'CLOSED_TRADES_CURRENT','locked':con>=MAX_CONSECUTIVE_LOSSES or pnl<=ll or len(closed)>=MAX_DAILY_TRADES,'eodUnresolved':unresolved}
 def open_positions():
  init_paper_db()
  with _conn() as c:return [dict(r) for r in c.execute("SELECT * FROM paper_trades WHERE status='OPEN' ORDER BY id")]
@@ -94,7 +97,10 @@ def scan():
   e['marketBreadth']=round(breadth,3)
   if e['action']=='BUY_CANDIDATE' and breadth<MIN_MARKET_BREADTH and e['score']<STRONG_OVERRIDE_SCORE:e['action']='SETUP';e.setdefault('blockedReasons',[]).append('시장 breadth 약함')
   if stats['locked'] and e['action']=='BUY_CANDIDATE':e['action']='SHADOW_ONLY'
- evs.sort(key=lambda e:(float(e.get('score') or 0),float((e.get('market') or {}).get('activityScore') or 0)),reverse=True);return evs
+ evs.sort(key=lambda e:(float(e.get('score') or 0),float((e.get('market') or {}).get('activityScore') or 0)),reverse=True)
+ try:record_scan_observations(evs)
+ except Exception:pass
+ return evs
 def _snapshot(ev):
  i=ev.get('indicators') or {};m=ev.get('market') or {};return json.dumps({'score':ev.get('score'),'rsi':i.get('rsi'),'adx':i.get('adx'),'plusDI':i.get('plusDI'),'minusDI':i.get('minusDI'),'volumeRatio':i.get('volumeRatio'),'vwap':i.get('vwap'),'ema9':i.get('ema9'),'ema20':i.get('ema20'),'orbHigh':i.get('openingRangeHigh'),'turnoverEok':m.get('turnoverEok'),'activityScore':m.get('activityScore'),'spreadPct':m.get('spreadPct'),'marketBreadth':ev.get('marketBreadth'),'bucket':i.get('bucket')},ensure_ascii=False)
 def paper_enter(code,capital=INITIAL_CAPITAL,evaluation=None):
@@ -108,8 +114,9 @@ def paper_enter(code,capital=INITIAL_CAPITAL,evaluation=None):
   if shadow:return {'ok':True,'shadow':True,'message':'Daily Lock: 신호만 기록','evaluation':ev}
   if c.execute("SELECT COUNT(*) n FROM paper_trades WHERE status='OPEN'").fetchone()['n']>=MAX_OPEN_POSITIONS:return {'ok':False,'message':'동시 포지션 제한','evaluation':ev}
   if c.execute("SELECT 1 FROM paper_trades WHERE code=? AND status='OPEN'",(code,)).fetchone():return {'ok':False,'message':'이미 열린 Paper 포지션','evaluation':ev}
-  fill=price*(1+SLIPPAGE_RATE);cur=c.execute("INSERT INTO paper_trades(code,entry_at,entry_price,qty,score,reasons,status,peak_price,trough_price,entry_snapshot) VALUES(?,?,?,?,?,?,'OPEN',?,?,?)",(code,now,fill,qty,ev['score'],reasons,fill,fill,_snapshot(ev)));tid=cur.lastrowid
- collector.set_priority_codes([p['code'] for p in open_positions()]);return {'ok':True,'shadow':False,'tradeId':tid,'code':code,'price':fill,'qty':qty,'stopPrice':fill*(1-STOP_PCT),'breakevenProtectPrice':fill*(1+BREAKEVEN_BUFFER_PCT),'trailActivatePrice':fill*(1+TRAIL_ACTIVATE_PCT),'evaluation':ev}
+  entry_seq=int(c.execute("SELECT COUNT(*) n FROM paper_trades WHERE entry_at LIKE ?",(_today_prefix()+'%',)).fetchone()['n'])+1
+  fill=price*(1+SLIPPAGE_RATE);cur=c.execute("INSERT INTO paper_trades(code,entry_at,entry_price,qty,score,reasons,status,peak_price,trough_price,entry_snapshot,entry_sequence) VALUES(?,?,?,?,?,?,'OPEN',?,?,?,?)",(code,now,fill,qty,ev['score'],reasons,fill,fill,_snapshot(ev),entry_seq));tid=cur.lastrowid
+ collector.set_priority_codes([p['code'] for p in open_positions()]);return {'ok':True,'shadow':False,'tradeId':tid,'entrySequence':entry_seq,'code':code,'price':fill,'qty':qty,'stopPrice':fill*(1-STOP_PCT),'breakevenProtectPrice':fill*(1+BREAKEVEN_BUFFER_PCT),'trailActivatePrice':fill*(1+TRAIL_ACTIVATE_PCT),'evaluation':ev}
 def _failure(reason,pnl,mfe,mae,snap):
  if pnl>=0:return 'WIN'
  if reason=='STOP_LOSS' and mfe>=.8:return 'GAVE_BACK_PROFIT'
