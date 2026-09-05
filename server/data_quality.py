@@ -1,8 +1,8 @@
 """Market-data quality gates for research/backtests.
 
-Structural quality remains visible for diagnostics, while profitability/robust
-research uses a stricter grade that also requires official NH 5-minute provenance.
-This module never changes Control/Paper trading behavior.
+Structural quality remains visible for diagnostics, while the default research
+quality map requires official NH 5-minute provenance. This module never changes
+Control/Paper trading behavior.
 """
 import sqlite3
 from datetime import datetime
@@ -64,8 +64,8 @@ def quality_details(max_days=120):
     return out
 
 
-def quality_map(max_days=120):
-    """Structural bar-quality map retained for diagnostics/backward compatibility."""
+def structural_quality_map(max_days=120):
+    """OHLCV completeness/validity only; useful for diagnostics."""
     return {(x['code'],x['date']):x['grade'] for x in quality_details(max_days)}
 
 
@@ -74,12 +74,17 @@ def research_quality_map(max_days=120):
     return {(x['code'],x['date']):x['researchGrade'] for x in quality_details(max_days)}
 
 
+def quality_map(max_days=120):
+    """Default research gate, intentionally strict for backward-compatible callers."""
+    return research_quality_map(max_days)
+
+
 def good_day_keys(max_days=120):
     return {k for k,v in quality_map(max_days).items() if v=='GOOD'}
 
 
 def official_good_day_keys(max_days=120):
-    return {k for k,v in research_quality_map(max_days).items() if v=='GOOD'}
+    return good_day_keys(max_days)
 
 
 def audit(max_days=120):
