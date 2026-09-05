@@ -66,11 +66,41 @@
     return snapResponse(res,text);
   }
 
+  async function normalizeUpdateResponse(input,init){
+    const res=await nativeFetch(input,init);
+    let data=null;
+    try{data=await res.clone().json()}catch{return res}
+    if(!data||typeof data!=='object')return res;
+
+    // A second tap while the updater is already active should join the existing
+    // update flow instead of showing a misleading HTTP 409 popup.
+    if(res.status===409&&data.error==='이미 업데이트 중입니다.'){
+      const headers=new Headers(res.headers);
+      headers.set('content-type','application/json; charset=utf-8');
+      return new Response(JSON.stringify({ok:true,message:'이미 업데이트 중입니다. 완료될 때까지 기다립니다.',alreadyRunning:true}),{status:200,statusText:'OK',headers});
+    }
+
+    // live-app historically reads only `detail`; Android updater returns `error`.
+    // Mirror it so the user sees the exact safety-block reason instead of HTTP 409.
+    if(!res.ok&&data.error&&!data.detail){
+      data.detail=data.error;
+      const headers=new Headers(res.headers);
+      headers.set('content-type','application/json; charset=utf-8');
+      return new Response(JSON.stringify(data),{status:res.status,statusText:res.statusText,headers});
+    }
+    return res;
+  }
+
   window.fetch=async function(input,init={}){
     let url;
     try{url=new URL(typeof input==='string'?input:input.url,location.href)}catch{return nativeFetch(input,init)}
     const method=String(init?.method||(typeof input!=='string'&&input.method)||'GET').toUpperCase();
-    if(method!=='GET'||url.origin!==location.origin)return nativeFetch(input,init);
+    if(url.origin!==location.origin)return nativeFetch(input,init);
+
+    if(method==='POST'&&(url.pathname==='/api/system/update'||url.pathname==='/api/system/update/run')){
+      return normalizeUpdateResponse(input,init);
+    }
+    if(method!=='GET')return nativeFetch(input,init);
 
     if(url.pathname==='/api/mobile/status'){
       const now=Date.now();
