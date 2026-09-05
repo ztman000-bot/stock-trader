@@ -22,19 +22,38 @@ pid_cmdline(){
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
 }
 
+is_server_pid(){
+  local pid="${1:-}" cmd=""
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(pid_cmdline "$pid")
+  echo "$cmd" | grep -qE 'python(3)? .*[-]m uvicorn android_unified_app:app|uvicorn android_unified_app:app'
+}
+
 server_state(){
-  local pid="" cmd=""
-  [ -f "$SERVER_PIDFILE" ] && pid=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
-  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-    fail "server not alive (pid=${pid:-none})"
+  local pid="" old="" p=""
+  [ -f "$SERVER_PIDFILE" ] && old=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
+  pid="$old"
+
+  if ! is_server_pid "$pid"; then
+    for p in $(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null || true); do
+      if is_server_pid "$p"; then
+        pid="$p"
+        break
+      fi
+    done
+  fi
+
+  if ! is_server_pid "$pid"; then
+    [ -f "$SERVER_PIDFILE" ] && rm -f "$SERVER_PIDFILE" 2>/dev/null || true
+    fail "server not alive (pid=${old:-none})"
     return
   fi
-  cmd=$(pid_cmdline "$pid")
-  if echo "$cmd" | grep -q 'uvicorn android_unified_app:app'; then
-    ok "server PID=$pid alive and identity verified"
-  else
-    fail "server PID=$pid is alive but points to an unexpected process"
+
+  if [ "$old" != "$pid" ]; then
+    printf '%s\n' "$pid" > "$SERVER_PIDFILE"
+    ok "server PID file self-repaired: ${old:-none} -> $pid"
   fi
+  ok "server PID=$pid alive and identity verified"
 }
 
 watchdog_state(){
