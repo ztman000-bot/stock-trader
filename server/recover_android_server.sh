@@ -44,6 +44,40 @@ is_server_pid(){
   echo "$cmd" | grep -qE 'python(3)? .*[-]m uvicorn android_unified_app:app|uvicorn android_unified_app:app'
 }
 
+discover_server_pid(){
+  local p=""
+  if [ -f "$PIDFILE" ]; then
+    p=$(cat "$PIDFILE" 2>/dev/null || true)
+    if is_server_pid "$p"; then
+      echo "$p"
+      return 0
+    fi
+  fi
+  for p in $(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null || true); do
+    if is_server_pid "$p"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+repair_server_pidfile(){
+  local p="" old=""
+  old=$(cat "$PIDFILE" 2>/dev/null || true)
+  p=$(discover_server_pid 2>/dev/null || true)
+  if [ -n "$p" ]; then
+    if [ "$old" != "$p" ]; then
+      printf '%s\n' "$p" > "$PIDFILE"
+      echo "[OK] server PID file self-repaired: PID=$p (previous=${old:-none})"
+    fi
+    echo "$p"
+    return 0
+  fi
+  [ -f "$PIDFILE" ] && rm -f "$PIDFILE" 2>/dev/null || true
+  return 1
+}
+
 is_update_pid(){
   local p="${1:-}" cmd=""
   pid_alive "$p" || return 1
@@ -125,6 +159,7 @@ PY
 }
 
 if [ "$FORCE_RESTART" != "1" ] && health_ok; then
+  repair_server_pidfile >/dev/null || true
   echo '[OK] Android Stock Trader server is already healthy.'
   exit 0
 fi
@@ -168,6 +203,7 @@ echo "[INFO] start requested PID=$PID"
 
 for _ in $(seq 1 60); do
   if health_ok; then
+    repair_server_pidfile >/dev/null || true
     echo '[OK] Android Stock Trader server recovered and is healthy.'
     exit 0
   fi
