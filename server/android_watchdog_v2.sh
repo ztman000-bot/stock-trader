@@ -62,17 +62,25 @@ is_watchdog_pid(){
 }
 
 server_pid(){
-  local p=""
+  local p="" saved=""
   if [ -f "$SERVER_PIDFILE" ]; then
-    p=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
-    if is_server_pid "$p"; then
-      echo "$p"
-      return
+    saved=$(cat "$SERVER_PIDFILE" 2>/dev/null || true)
+    if is_server_pid "$saved"; then
+      echo "$saved"
+      return 0
     fi
     rm -f "$SERVER_PIDFILE" 2>/dev/null || true
   fi
-  p=$(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null | head -1 || true)
-  is_server_pid "$p" && echo "$p" || true
+
+  for p in $(pgrep -f 'python.*-m uvicorn android_unified_app:app' 2>/dev/null || true); do
+    if is_server_pid "$p"; then
+      printf '%s\n' "$p" > "$SERVER_PIDFILE"
+      log "server PID file self-repaired pid=$p previous=${saved:-none}"
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
 }
 
 heartbeat_fresh(){
@@ -185,7 +193,8 @@ if [ -f "$PIDFILE" ]; then
 fi
 echo $$ > "$PIDFILE"
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1 || true
-log "watchdog-v2 started pid=$$ interval=${INTERVAL}s hard=${HARD_LIMIT} soft=${SOFT_LIMIT} heartbeat=${HEARTBEAT_MAX_AGE}s"
+initial_spid=$(server_pid 2>/dev/null || true)
+log "watchdog-v2 started pid=$$ interval=${INTERVAL}s hard=${HARD_LIMIT} soft=${SOFT_LIMIT} heartbeat=${HEARTBEAT_MAX_AGE}s serverPid=${initial_spid:-none} pidSelfHeal=true"
 
 while true; do
   sleep "$INTERVAL"
@@ -210,13 +219,16 @@ while true; do
     continue
   fi
 
+  # Reconcile the PID file on every cycle, even while the HTTP health check is good.
+  # This makes loss/corruption of the bookkeeping file self-healing without restarting a healthy server.
+  spid=$(server_pid 2>/dev/null || true)
+
   if health_ok; then
     FAILS=0
     continue
   fi
 
   FAILS=$((FAILS + 1))
-  spid=$(server_pid)
   alive=0; fresh=0
   is_server_pid "$spid" && alive=1
   heartbeat_fresh && fresh=1
