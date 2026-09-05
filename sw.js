@@ -1,18 +1,19 @@
-const CACHE='stock-day-trader-live-v1788465000-android-update';
+const CACHE='stock-day-trader-live-v1788577200-classic-fast-start';
 const CORE_ASSETS=[
   '/classic',
-  '/styles.css?v=1788465000',
-  '/js/app-safe.js?v=1788465000',
+  '/styles.css?v=1788577200',
+  '/js/app-safe.js?v=1788577200',
   '/js/config.js',
-  '/js/ui-polish.js?v=1788465000',
-  '/js/live-app.js?v=1788465000',
-  '/js/trade-name-fix.js?v=1788465000',
-  '/js/scanner-resilience.js?v=1788465000',
-  '/js/history-ui.js?v=1788465000',
-  '/js/strategy-lab-ui.js?v=1788465000',
-  '/js/market-lab-ui.js?v=1788465000',
-  '/js/final-results-ui.js?v=1788465000',
-  '/manifest.webmanifest?v=1788465000',
+  '/js/classic-fast-start.js?v=1788577200',
+  '/js/ui-polish.js?v=1788577200',
+  '/js/live-app.js?v=1788577200',
+  '/js/trade-name-fix.js?v=1788577200',
+  '/js/scanner-resilience.js?v=1788577200',
+  '/js/history-ui.js?v=1788577200',
+  '/js/strategy-lab-ui.js?v=1788577200',
+  '/js/market-lab-ui.js?v=1788577200',
+  '/js/final-results-ui.js?v=1788577200',
+  '/manifest.webmanifest?v=1788577200',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
