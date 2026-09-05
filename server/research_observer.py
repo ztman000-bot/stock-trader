@@ -4,6 +4,10 @@ This module records what the scanner saw and why it did or did not trade. It
 never sends orders, never mutates Control rules, and adds no NH API traffic.
 Outcome labels are recomputed from the local bars database so later official
 NH backfills can replace provisional live-sampled labels.
+
+The v0.17.10 observer deliberately uses its own universe snapshot table name.
+Older releases may already have a legacy ``universe_snapshots`` table with a
+different schema; reusing that generic table name can break safe upgrades.
 """
 import json
 import sqlite3
@@ -14,6 +18,7 @@ from collector import DB_PATH, KST, collector, instrument_meta, universe_verifie
 
 HORIZONS_MIN = (5, 10, 30, 60)
 OFFICIAL_5M_SOURCE = 'nh_period_5m'
+UNIVERSE_TABLE = 'research_universe_snapshots_v01710'
 _ALLOWED_ACTIONS = {
     'BUY_CANDIDATE', 'SETUP', 'WATCH', 'SHADOW_ONLY', 'BLOCKED',
     'PROTECTED', 'SAFETY_WAIT', 'WAIT_DATA',
@@ -78,7 +83,7 @@ def init_observer_db():
           observed_at TEXT NOT NULL,
           snapshot_json TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS universe_snapshots(
+        CREATE TABLE IF NOT EXISTS research_universe_snapshots_v01710(
           snapshot_date TEXT NOT NULL,
           code TEXT NOT NULL,
           selected_rank INTEGER NOT NULL,
@@ -88,8 +93,8 @@ def init_observer_db():
           captured_at TEXT NOT NULL,
           PRIMARY KEY(snapshot_date,code)
         );
-        CREATE INDEX IF NOT EXISTS idx_universe_snapshots_date_rank
-          ON universe_snapshots(snapshot_date,selected_rank);
+        CREATE INDEX IF NOT EXISTS idx_research_universe_v01710_date_rank
+          ON research_universe_snapshots_v01710(snapshot_date,selected_rank);
         CREATE TABLE IF NOT EXISTS bar_5m_provenance(
           code TEXT NOT NULL,bucket TEXT NOT NULL,source TEXT NOT NULL,updated_at TEXT NOT NULL,
           PRIMARY KEY(code,bucket)
@@ -125,7 +130,7 @@ def capture_universe_snapshot():
     with _conn() as c:
         for rank, code in enumerate(codes, 1):
             meta = instrument_meta(code)
-            c.execute('''INSERT OR IGNORE INTO universe_snapshots(
+            c.execute('''INSERT OR IGNORE INTO research_universe_snapshots_v01710(
                          snapshot_date,code,selected_rank,name,market,market_cap_eok,captured_at)
                          VALUES(?,?,?,?,?,?,?)''',
                       (day, str(code), rank, meta.get('name') or str(code), meta.get('market'),
@@ -324,8 +329,8 @@ def observation_report(limit=100):
                     ret_5m,ret_10m,ret_30m,ret_60m,ret_eod,label_count,official_label_count,labels_official
                     FROM decision_observations ORDER BY id DESC LIMIT ?''', (limit,)).fetchall()]
         market = [dict(r) for r in c.execute('SELECT bucket,observed_at,snapshot_json FROM market_observation_snapshots ORDER BY bucket DESC LIMIT 20').fetchall()]
-        universe_days = int(c.execute('SELECT COUNT(DISTINCT snapshot_date) FROM universe_snapshots').fetchone()[0])
-        universe_rows = int(c.execute('SELECT COUNT(*) FROM universe_snapshots').fetchone()[0])
+        universe_days = int(c.execute('SELECT COUNT(DISTINCT snapshot_date) FROM research_universe_snapshots_v01710').fetchone()[0])
+        universe_rows = int(c.execute('SELECT COUNT(*) FROM research_universe_snapshots_v01710').fetchone()[0])
     return {
         'ok': True,
         'version': '0.17.10',
@@ -339,6 +344,7 @@ def observation_report(limit=100):
         'todayActions': actions,
         'labeledObservations': labeled,
         'fullyOfficialLabeledObservations': official,
+        'universeSnapshotTable': UNIVERSE_TABLE,
         'universeSnapshotDays': universe_days,
         'universeSnapshotRows': universe_rows,
         'recent': recent,
