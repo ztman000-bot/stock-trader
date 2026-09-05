@@ -10,6 +10,7 @@ venv/
 server/*.db
 server/*.db-wal
 server/*.db-shm
+server/backups/
 server/stock_trader_server.log
 server/stock_trader_startup.log
 server/stock_trader_watchdog.log
