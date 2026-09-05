@@ -27,7 +27,7 @@ ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.8'
+UI_VERSION='0.17.9'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -166,7 +166,7 @@ def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.8','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.9','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'scannerIntelligence':True,'timeOfDayRvol':True,'rvol5':True,'rvol15':True,'rvol30':True,
@@ -175,24 +175,32 @@ def ui_health(request):
             'decisionMetadataEngine':True,'riskScoreShadowMode':True,'evidenceBasedLossAnalysis':True,
             'sharedMarketStateEngine':True,'riskScoreAffectsLiveTrading':False,'aiAutoMutation':False,
             'profitabilityLab':True,'exitIntelligenceV2':True,'pullbackEntry':True,
-            'payoffTracking':True,'goodDataGate':True,'walkForward':True,'finalLockbox':True,
+            'payoffTracking':True,'goodDataGate':True,'officialNh5mProvenanceGate':True,
+            'walkForward':True,'purgedNonOverlapWalkForward':True,'finalLockbox':True,
             'publicStrategyBenchmark':True,'publicOrbBenchmark':True,'fixedStrategyComparison':True,
             'dataQualityAudit':True,'oneMinuteExitGate':True,'automaticResearch':True,
             'liveSessionResearchDefer':True,'overnightLab':True,'liveMutation':False
         },
         'backtest':{
             'enabled':True,'engine':'precise-portfolio-v1','executionModel':'next-bar-open',
-            'costsIncluded':True,'stressTests':True,'qualityGate':'GOOD_ONLY',
+            'costsIncluded':True,'stressTests':True,'qualityGate':'OFFICIAL_NH_GOOD_ONLY',
             'krOneMinuteDataCollector':True,'oneMinuteExitReplayConnected':True,
             'oneMinutePathAmbiguityExplicit':True,
             'benchmarkSameCostModel':True,'liveMutation':False
         },
-        'reliability':{'watchdog':True,'updatePreflight':True,'automaticRollback':True,'rollbackTarget':'previous-git-commit'},
-        'security':{'localhostBindExpected':True,'tailscaleProxyExpected':True},
+        'reliability':{
+            'watchdog':True,'runtimeQuoteFreshnessWatchdog':True,'updatePreflight':True,
+            'safetyInvariantCI':True,'automaticRollback':True,'dependencyRollback':True,
+            'walSafeDbSnapshots':True,'eodUnresolvedTracking':True,'rollbackTarget':'previous-git-commit'
+        },
+        'security':{
+            'localhostBindExpected':True,'tailscaleProxyExpected':True,
+            'androidMutationGuardExpected':True
+        },
         'krMarket':{
             'oneMinuteResearchCollector':True,'liveTransport':'NH WebSocket oc',
-            'historicalTransport':'NH REST period gubun=5 xtick=1','liveFocusMax':10,
-            'sharedRestThrottle':True,'scannerIntelUsesExtraNhRest':False,
+            'historicalTransport':'NH REST period gubun=5 xtick=1','official5mProvenance':True,
+            'liveFocusMax':10,'sharedRestThrottle':True,'scannerIntelUsesExtraNhRest':False,
             'scannerIntelSnapshotSec':300,'decisionIntelSnapshotSec':300,'realOrder':False
         },
         'usMarket':{

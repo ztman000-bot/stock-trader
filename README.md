@@ -1,4 +1,4 @@
-# Stock Day Trader v0.17.8
+# Stock Day Trader v0.17.9
 
 NH PLUG 실데이터를 사용하는 **개인용 데이트레이딩 연구·Paper 운용 플랫폼**입니다. 현재 목표는 새로운 전략을 계속 추가하는 것이 아니라 데이터 품질, 의사결정 메타데이터, 리스크 검증, 체결 현실성, 서버 안정성을 단계적으로 높이는 것입니다.
 
@@ -6,9 +6,13 @@ NH PLUG 실데이터를 사용하는 **개인용 데이트레이딩 연구·Pape
 
 ## 현재 구조
 
-`Phone PWA → Tailscale HTTPS → Lenovo localhost FastAPI → NH PLUG`
+주 운용 경로는 상황에 따라 하나만 사용합니다.
 
-- 서버는 `127.0.0.1:8000`에만 바인딩합니다.
+- Android 임시 서버: `Phone PWA → Tailscale → Android/Termux FastAPI → NH PLUG`
+- Windows 서버: `Phone PWA → Tailscale HTTPS → Lenovo localhost FastAPI → NH PLUG`
+
+Android는 `APP_MODE=paper` 및 `ENABLE_TRADING=false`가 로컬 `.env`에서 확인되지 않으면 시작/복구/업데이트를 거부합니다. 상태변경 HTTP 요청(POST/PUT/PATCH/DELETE)은 Android에서 localhost 또는 Tailscale 100.x 클라이언트만 허용합니다.
+
 - NH App Key / App Secret은 로컬 `server/.env`에만 저장합니다.
 - GitHub/프론트엔드/채팅에 인증정보를 넣지 않습니다.
 - 기존 장기보유 보호종목 `068270`은 자동매매 대상에서 제외합니다.
@@ -25,15 +29,37 @@ NH PLUG 실데이터를 사용하는 **개인용 데이트레이딩 연구·Pape
 - 손절 / 비용회수 보호 / Trailing / EOD 관리
 - DAILY LOCK 이후에도 Scanner·Shadow·연구는 계속
 
+## v0.17.9 Reliability Hardening
+
+서버 프로세스가 살아 있다는 사실만으로 정상이라고 판단하지 않습니다.
+
+- Android Watchdog: PID/프로세스 identity, heartbeat, Paper loop, Collector loop를 검사
+- 장중 startup grace 이후 `/api/system/runtime-health`의 실제 quote freshness까지 확인
+- 업데이트 중 Watchdog 재시작 경쟁을 update flag로 차단
+- `preflight.py`: 새 코드 적용 전 Python compile/core import 검사
+- Safety Invariant CI: 모든 PR에서 Python 전체 compile + `test_*.py` 실행
+- Android updater도 동일한 Safety Invariant를 로컬에서 통과해야 서버 교체 가능
+- 새 서버 Health 실패 시 이전 Git commit으로 rollback 후 재기동
+- Android requirements 변경 시 이전 pinned requirements를 재설치하고 `pip check`
+- 업데이트 직전 WAL-safe SQLite snapshot + `PRAGMA quick_check(1)` 검증
+- Android 장후 일일 DB snapshot 자동화, 기본 7개 보존
+- EOD Paper 종료 시 최신 quote가 없으면 가짜 가격을 만들지 않고 `eod_unresolved`로 기록하며 해당 종목 수집 우선순위를 유지
+
+Watchdog, 백업, 연구 모듈은 주문 권한을 가지지 않습니다.
+
 ## 데이터 및 Scanner
 
 ### KR
 - 공식 NH 종목마스터 기반 Safe Universe
-- 현재가/호가 기본정보 및 5분봉
+- 현재가/호가 기본정보 및 장중 5분봉
+- 과거/연구용 공식 NH 기간별시세 5분봉 provenance 별도 기록
+- Profitability/Robust 연구에는 **구조적으로 GOOD이면서 공식 NH provenance가 76봉 이상 확인된 code-day만 사용**
 - 1분봉 연구 수집: 장중 WebSocket + 장후 REST 보충
 - Stocks-in-Play Point-in-Time 스냅샷
 - Scanner Intelligence: RVOL5/15/30/Time, Gap, ATR14%, Relative Strength, Spread, Book Imbalance
 - 선택적 OpenDART Catalyst
+
+장중 Control/Paper의 실시간 5분봉 경로는 provenance 연구 게이트와 분리되어 있으며 v0.17.9에서 매매 규칙을 변경하지 않습니다.
 
 ### US
 - KR과 별도 DB/통계
@@ -60,19 +86,7 @@ NH PLUG 실데이터를 사용하는 **개인용 데이트레이딩 연구·Pape
 ### Loss Intelligence
 기존 `failure_type`, 진입 `entry_snapshot`, MFE/MAE를 재사용해 거래량 부족, 약한 추세, 과매수, 약한 시장 breadth, 높은 spread, VWAP 추격, 수익 반납, follow-through 부족, 불리한 시장상태 등을 **원인 확정이 아닌 증거 기반 가설**로 순위화합니다.
 
-## v0.17.8 Reliability
-
-서버가 죽으면 데이터 수집·Paper·연구가 모두 멈추기 때문에 안정성을 별도 계층으로 강화했습니다.
-
-- `watchdog.py`: localhost `/api/health`를 주기적으로 확인하고 연속 실패 시 서버 재시작
-- 업데이트 중에는 watchdog이 재시작 경쟁을 하지 않도록 update flag 사용
-- `preflight.py`: 새 코드를 적용하기 전에 Python compile/core import 검사
-- `remote_update.cmd`: **새 코드 사전검사 → 기존 서버 종료 → 새 서버 Health 확인** 순서
-- 새 서버 Health 실패 시 이전 Git commit으로 자동 rollback 후 이전 서버 재기동
-
-Watchdog은 매매 전략이나 주문 권한을 가지지 않습니다.
-
-## v0.17.8 KR 1m Exit Replay
+## KR 1m Exit Replay
 
 `bars_1m`에 쌓인 완성 1분봉으로 현재 Control의 Stop / Trailing / Cost-cover / EOD 순서를 재현합니다.
 
@@ -92,17 +106,19 @@ Watchdog은 매매 전략이나 주문 권한을 가지지 않습니다.
 
 ## 연구/검증 파이프라인
 
-- GOOD/PARTIAL/BAD Data Quality Audit
+- Structural GOOD/PARTIAL/BAD Data Quality Audit
+- Official NH 5m provenance research gate
 - Stocks-in-Play / Scanner Challenger Shadow 비교
 - Strategy / Exit / Pullback / Payoff 연구
 - Public-style ORB Benchmark
-- Walk-Forward 개발 구간
-- 미사용 Final Lockbox
+- **Expanding non-overlap Walk-Forward + 1거래일 purge gap**
+- 최소 3개 유효 fold, 유효 fold의 75% 이상 양수 요구
+- 미사용 Final Lockbox, 최소 20거래 요구
 - 2x Slippage + 1-bar Late Stress
 - KR 1분봉 커버리지 Gate
 - KR 1m Exit Replay Gate
 
-`Robust Validation pass`와 `deploymentReady`를 분리합니다. 기존 연구 pass가 나와도 1m Exit Replay 검증이 부족하면 deploymentReady는 false입니다. NH Simulation Fill 검증과 Micro Live는 그 이후 별도 단계입니다.
+`Robust Validation pass`와 `deploymentReady`를 분리합니다. 연구 pass가 나와도 1m Exit Replay 검증이 부족하면 `deploymentReady=false`입니다. NH Simulation Fill 검증과 Micro Live는 그 이후 별도 단계입니다.
 
 ## 자본 정책
 
@@ -120,11 +136,25 @@ Windows:
 server\start_stock_trader_background.cmd
 ```
 
-수동 실행:
+Windows 수동 실행:
 
 ```bat
 cd server
 .venv\Scripts\python.exe -m uvicorn unified_app:app --host 127.0.0.1 --port 8000
+```
+
+Android/Termux:
+
+```sh
+cd ~/stock-trader
+bash server/start_android.sh
+```
+
+안정성 점검:
+
+```sh
+cd ~/stock-trader
+bash server/android_stability_check.sh
 ```
 
 ## 주요 상태 API
@@ -132,8 +162,10 @@ cd server
 - `/api/health`
 - `/api/system/runtime-health`
 - `/api/system/ui-health`
+- `/api/system/android-watchdog` (Android)
 - `/api/research/status`
 - `/api/research/final`
+- `/api/research/data-quality`
 - `/api/research/scanner-intelligence`
 - `/api/research/decision-intelligence`
 - `/api/research/1m-exit-replay`
@@ -142,4 +174,4 @@ cd server
 
 ## 실전 승격 원칙
 
-새 기능이나 높은 과거 PF만으로 실전 승격하지 않습니다. 충분한 Point-in-Time 데이터와 OOS/Walk-Forward/Lockbox/비용·체결 스트레스, 1분봉 Exit 재현, NH 모의주문 실제 체결 검증을 통과한 뒤에만 Micro Live를 검토합니다.
+새 기능이나 높은 과거 PF만으로 실전 승격하지 않습니다. 충분한 Point-in-Time 데이터와 공식 NH provenance, purged/non-overlap Walk-Forward, Final Lockbox, 비용·체결 스트레스, 1분봉 Exit 재현, NH 모의주문 실제 체결 검증을 통과한 뒤에만 Micro Live를 검토합니다.
