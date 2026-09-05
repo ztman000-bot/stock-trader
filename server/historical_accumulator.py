@@ -2,7 +2,7 @@
 import sqlite3,threading,time
 from datetime import datetime,timedelta
 from collector import DB_PATH,KST,nh_call,collector,PROTECTED_CODES,regular_session
-REGIME_PROXY_CODES=['069500','229200'];_LOCK=threading.Lock();_STOP=threading.Event();_THREAD=None
+REGIME_PROXY_CODES=['069500','229200'];OFFICIAL_SOURCE='nh_period_5m';_LOCK=threading.Lock();_STOP=threading.Event();_THREAD=None
 STATUS={'running':False,'pausedForLive':False,'startedAt':None,'finishedAt':None,'lastError':None,'targetDays':0,'targetCodes':0,'completedJobs':0,'totalJobs':0,'writtenBars':0,'skippedBars':0,'failedJobs':0,'currentCode':None,'currentDate':None,'requestedDays':20,'requestedCodes':40}
 def _period_rows(p):
  if not isinstance(p,dict):return []
@@ -15,8 +15,15 @@ def _trading_dates(days):
   if d.weekday()<5:out.append(d)
   d-=timedelta(days=1)
  return out
-def _existing_count(code,day):
- with sqlite3.connect(DB_PATH,timeout=10) as c:return int(c.execute("SELECT COUNT(*) FROM bars_5m WHERE code=? AND substr(bucket,1,10)=?",(code,day.strftime('%Y-%m-%d'))).fetchone()[0])
+def _ensure_provenance(c):
+ c.execute('''CREATE TABLE IF NOT EXISTS bar_5m_provenance(code TEXT NOT NULL,bucket TEXT NOT NULL,source TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(code,bucket))''')
+ c.execute('CREATE INDEX IF NOT EXISTS idx_bar_5m_provenance_source ON bar_5m_provenance(source,code,bucket)')
+def _existing_counts(code,day):
+ ds=day.strftime('%Y-%m-%d')
+ with sqlite3.connect(DB_PATH,timeout=10) as c:
+  _ensure_provenance(c)
+  r=c.execute('''SELECT COUNT(b.bucket),SUM(CASE WHEN p.source=? THEN 1 ELSE 0 END) FROM bars_5m b LEFT JOIN bar_5m_provenance p ON p.code=b.code AND p.bucket=b.bucket WHERE b.code=? AND substr(b.bucket,1,10)=?''',(OFFICIAL_SOURCE,code,ds)).fetchone()
+ return int(r[0] or 0),int(r[1] or 0)
 def _wait_for_research_window():
  while regular_session() and not _STOP.is_set():
   with _LOCK:STATUS['pausedForLive']=True
@@ -24,13 +31,14 @@ def _wait_for_research_window():
  with _LOCK:STATUS['pausedForLive']=False
  return not _STOP.is_set()
 def _download_day(code,day):
- existing=_existing_count(code,day)
- # GOOD-data research requires at least 76 usable 5m bars. Partial 70~75 bar days are re-fetched.
- if existing>=76:return {'cached':True,'written':0,'skipped':existing,'received':existing}
- if not _wait_for_research_window():return {'cached':False,'written':0,'skipped':0,'received':0}
+ existing,official=_existing_counts(code,day)
+ # Research requires structurally complete bars whose official NH source is known.
+ # Legacy/live-sampled rows without provenance are deliberately re-fetched after market.
+ if existing>=76 and official>=76:return {'cached':True,'written':0,'skipped':existing,'received':existing,'official':official}
+ if not _wait_for_research_window():return {'cached':False,'written':0,'skipped':0,'received':0,'official':official}
  payload=nh_call('/krstock/quote/v1/period',{'market_cd':'KRX','iem_cd':code,'edate':day.strftime('%Y%m%d'),'array_cnt':'120','gubun':'5','xtick':'5','today_cls_code':'1' if day==datetime.now(KST).date() else '0','fake_tick':'1'});rows=_period_rows(payload);written=skipped=0
  with sqlite3.connect(DB_PATH,timeout=10) as c:
-  c.execute('PRAGMA journal_mode=WAL')
+  c.execute('PRAGMA journal_mode=WAL');_ensure_provenance(c);updated=datetime.now(KST).isoformat(timespec='seconds')
   for r in rows:
    ds=str(r.get('bsop_date') or '').strip();ts=str(r.get('bsop_time') or '').strip().zfill(6)
    if ds!=day.strftime('%Y%m%d'):skipped+=1;continue
@@ -38,8 +46,9 @@ def _download_day(code,day):
     dt=datetime.strptime(ds+ts,'%Y%m%d%H%M%S').replace(tzinfo=KST);dt=dt.replace(minute=(dt.minute//5)*5,second=0,microsecond=0);hm=dt.hour*60+dt.minute;o=float(r.get('stck_oprc') or 0);h=float(r.get('stck_hgpr') or 0);l=float(r.get('stck_lwpr') or 0);cl=float(r.get('stck_prpr') or 0);v=int(float(r.get('vol') or 0))
    except Exception:skipped+=1;continue
    if not 540<=hm<=930 or min(o,h,l,cl)<=0:skipped+=1;continue
-   c.execute('''INSERT INTO bars_5m(code,bucket,open,high,low,close,volume,sample_count) VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(code,bucket) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,sample_count=0''',(code,dt.isoformat(),o,h,l,cl,v));written+=1
- return {'cached':False,'written':written,'skipped':skipped,'received':len(rows)}
+   bucket=dt.isoformat();c.execute('''INSERT INTO bars_5m(code,bucket,open,high,low,close,volume,sample_count) VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(code,bucket) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,sample_count=0''',(code,bucket,o,h,l,cl,v));c.execute('''INSERT INTO bar_5m_provenance(code,bucket,source,updated_at) VALUES(?,?,?,?) ON CONFLICT(code,bucket) DO UPDATE SET source=excluded.source,updated_at=excluded.updated_at''',(code,bucket,OFFICIAL_SOURCE,updated));written+=1
+ _,official_after=_existing_counts(code,day)
+ return {'cached':False,'written':written,'skipped':skipped,'received':len(rows),'official':official_after}
 def _worker(days,max_codes):
  try:
   collector.wait_for_universe(timeout=20);codes=[c for c in list(collector.watchlist) if c not in PROTECTED_CODES][:max_codes]
@@ -70,4 +79,4 @@ def start(days=20,max_codes=40):
 def stop():_STOP.set();return {'ok':True,'message':'중지 요청됨','status':status()}
 def status():
  with _LOCK:s=dict(STATUS)
- total=max(1,int(s.get('totalJobs') or 0));s['progressPct']=round(int(s.get('completedJobs') or 0)/total*100,1) if s.get('totalJobs') else 0;s['regimeProxyCodes']=list(REGIME_PROXY_CODES);s['liveSessionPriority']=True;s['cacheMinBars']=76;return s
+ total=max(1,int(s.get('totalJobs') or 0));s['progressPct']=round(int(s.get('completedJobs') or 0)/total*100,1) if s.get('totalJobs') else 0;s['regimeProxyCodes']=list(REGIME_PROXY_CODES);s['liveSessionPriority']=True;s['cacheMinBars']=76;s['officialProvenance']=True;s['cacheMinOfficialBars']=76;return s
