@@ -18,6 +18,15 @@ def init_paper_db():
   additions={'peak_price':'REAL','trough_price':'REAL','entry_snapshot':'TEXT','mfe_pct':'REAL','mae_pct':'REAL','failure_type':'TEXT'}
   for n,t in additions.items():
    if n not in cols:c.execute(f'ALTER TABLE paper_trades ADD COLUMN {n} {t}')
+def _state_set(key,value):
+ init_paper_db();payload=json.dumps(value,ensure_ascii=False) if not isinstance(value,str) else value
+ with _conn() as c:c.execute('INSERT INTO paper_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(str(key),payload))
+def _state_json(key,default=None):
+ init_paper_db()
+ with _conn() as c:r=c.execute('SELECT value FROM paper_state WHERE key=?',(str(key),)).fetchone()
+ if not r:return default
+ try:return json.loads(r['value'])
+ except Exception:return default
 def _ema(v,p):
  if not v:return None
  a=2/(p+1);o=float(v[0])
@@ -57,7 +66,7 @@ def daily_stats():
  for r in reversed(closed):
   if float(r['pnl'] or 0)<0:con+=1
   else:break
- ll=-INITIAL_CAPITAL*DAILY_MAX_LOSS_PCT;return {'date':_today_prefix(),'closedTrades':len(closed),'pnl':round(pnl,2),'consecutiveLosses':con,'lossLimit':round(ll,2),'lossLimitHit':pnl<=ll,'maxDailyTrades':MAX_DAILY_TRADES,'locked':con>=MAX_CONSECUTIVE_LOSSES or pnl<=ll or len(closed)>=MAX_DAILY_TRADES}
+ unresolved=_state_json('eod_unresolved',{}) or {};ll=-INITIAL_CAPITAL*DAILY_MAX_LOSS_PCT;return {'date':_today_prefix(),'closedTrades':len(closed),'pnl':round(pnl,2),'consecutiveLosses':con,'lossLimit':round(ll,2),'lossLimitHit':pnl<=ll,'maxDailyTrades':MAX_DAILY_TRADES,'locked':con>=MAX_CONSECUTIVE_LOSSES or pnl<=ll or len(closed)>=MAX_DAILY_TRADES,'eodUnresolved':unresolved}
 def open_positions():
  init_paper_db()
  with _conn() as c:return [dict(r) for r in c.execute("SELECT * FROM paper_trades WHERE status='OPEN' ORDER BY id")]
@@ -118,12 +127,15 @@ def close_position(trade_id,market_price,reason='MANUAL'):
   entry=float(p['entry_price']);qty=int(p['qty']);peak=max(float(p['peak_price'] or entry),market);trough=min(float(p['trough_price'] or entry),market);exit_fill=market*(1-SLIPPAGE_RATE);gross=(exit_fill-entry)*qty;fees=entry*qty*COMMISSION_RATE+exit_fill*qty*(COMMISSION_RATE+SELL_TAX_RATE);pnl=gross-fees;pp=pnl/(entry*qty)*100 if entry*qty else 0;mfe=(peak/entry-1)*100;mae=(trough/entry-1)*100;snap=json.loads(p['entry_snapshot'] or '{}');ft=_failure(reason,pnl,mfe,mae,snap);now=datetime.now(KST).isoformat();c.execute("UPDATE paper_trades SET exit_at=?,exit_price=?,exit_reason=?,pnl=?,pnl_pct=?,status='CLOSED',peak_price=?,trough_price=?,mfe_pct=?,mae_pct=?,failure_type=? WHERE id=?",(now,exit_fill,reason,pnl,pp,peak,trough,mfe,mae,ft,trade_id))
  collector.set_priority_codes([p['code'] for p in open_positions()]);return {'id':trade_id,'code':p['code'],'reason':reason,'pnl':round(pnl,2),'pnlPct':round(pp,4),'mfePct':round(mfe,3),'maePct':round(mae,3),'failureType':ft,'exitPrice':exit_fill}
 def force_close_all(reason='EOD_EXIT'):
- latest={r['code']:float(r['price']) for r in latest_quotes()};out=[]
- for p in open_positions():
-  if latest.get(p['code']):
-   x=close_position(p['id'],latest[p['code']],reason)
+ latest={r['code']:float(r['price']) for r in latest_quotes()};out=[];unresolved=[];positions=open_positions()
+ for p in positions:
+  price=latest.get(p['code'])
+  if price:
+   x=close_position(p['id'],price,reason)
    if x:out.append(x)
- collector.set_priority_codes([]);return out
+  else:unresolved.append({'tradeId':p['id'],'code':p['code'],'entryAt':p['entry_at'],'reason':'NO_LATEST_QUOTE'})
+ remaining=open_positions();collector.set_priority_codes([p['code'] for p in remaining]);_state_set('eod_unresolved',{'recordedAt':datetime.now(KST).isoformat(),'exitReason':reason,'count':len(unresolved),'positions':unresolved})
+ return out
 def mark_positions():
  ps=open_positions();collector.set_priority_codes([p['code'] for p in ps]);latest={r['code']:float(r['price']) for r in latest_quotes([p['code'] for p in ps])};closed=[]
  for p in ps:
