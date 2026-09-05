@@ -1,4 +1,5 @@
 import ast
+import sqlite3
 from pathlib import Path
 import unittest
 
@@ -8,6 +9,19 @@ SERVER = ROOT / 'server'
 
 def text(name):
     return (SERVER / name).read_text(encoding='utf-8')
+
+
+def observer_init_script():
+    tree = ast.parse(text('research_observer.py'))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == 'init_observer_db':
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == 'executescript' and call.args
+                        and isinstance(call.args[0], ast.Constant)
+                        and isinstance(call.args[0].value, str)):
+                    return call.args[0].value
+    raise AssertionError('init_observer_db executescript not found')
 
 
 class ResearchDataExpansionTests(unittest.TestCase):
@@ -39,7 +53,8 @@ class ResearchDataExpansionTests(unittest.TestCase):
     def test_decision_observer_records_point_in_time_context(self):
         observer = text('research_observer.py')
         for marker in (
-            'decision_observations', 'market_observation_snapshots', 'universe_snapshots',
+            'decision_observations', 'market_observation_snapshots',
+            'research_universe_snapshots_v01710',
             'BUY_CANDIDATE', 'SETUP', 'WATCH', 'SHADOW_ONLY', 'BLOCKED',
             'ret_5m', 'ret_10m', 'ret_30m', 'ret_60m', 'ret_eod',
             "OFFICIAL_5M_SOURCE = 'nh_period_5m'",
@@ -47,6 +62,25 @@ class ResearchDataExpansionTests(unittest.TestCase):
             self.assertIn(marker, observer)
         self.assertIn('UNIQUE(code,signal_bucket,action)', observer)
         self.assertIn('capture_universe_snapshot()', observer)
+
+    def test_legacy_universe_snapshot_schema_does_not_block_init(self):
+        script = observer_init_script()
+        with sqlite3.connect(':memory:') as c:
+            # Mirrors the upgrade failure class: an older table uses the same
+            # generic name but does not have the new selected_rank column.
+            c.execute('''CREATE TABLE universe_snapshots(
+                         snapshot_date TEXT NOT NULL,
+                         code TEXT NOT NULL,
+                         legacy_rank INTEGER,
+                         captured_at TEXT NOT NULL,
+                         PRIMARY KEY(snapshot_date,code))''')
+            c.executescript(script)
+            legacy_cols = {r[1] for r in c.execute('PRAGMA table_info(universe_snapshots)')}
+            new_cols = {r[1] for r in c.execute('PRAGMA table_info(research_universe_snapshots_v01710)')}
+        self.assertNotIn('selected_rank', legacy_cols)
+        self.assertIn('selected_rank', new_cols)
+        self.assertIn('snapshot_date', new_cols)
+        self.assertIn('code', new_cols)
 
     def test_observer_has_no_broker_or_order_dependency(self):
         tree = ast.parse(text('research_observer.py'))
