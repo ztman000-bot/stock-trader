@@ -170,7 +170,6 @@ stop_android_server(){
 
 restart_watchdog(){
   [ -f "$WATCHDOG" ] || return 0
-  chmod +x "$WATCHDOG" 2>/dev/null || true
   local old=""
   [ -f "$WDPIDFILE" ] && old=$(cat "$WDPIDFILE" 2>/dev/null || true)
   if is_watchdog_pid "$old"; then
@@ -178,7 +177,7 @@ restart_watchdog(){
     sleep 1
   fi
   rm -f "$WDPIDFILE" 2>/dev/null || true
-  nohup "$WATCHDOG" >/dev/null 2>&1 &
+  nohup bash "$WATCHDOG" >/dev/null 2>&1 &
   echo $! > "$WDPIDFILE"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] watchdog v2 refreshed PID=$!"
 }
@@ -232,6 +231,9 @@ echo "$$ $(date +%s)" > "$UPDATE_FLAG"
 trap cleanup_exit EXIT INT TERM
 
 cd "$ROOT"
+# Termux often changes only the executable bit when shell scripts are chmod'ed.
+# Ignore file-mode-only drift while still blocking any real tracked content change.
+git config core.fileMode false || true
 DIRTY="$(git status --porcelain --untracked-files=no)"
 [ -z "$DIRTY" ] || fail "tracked local changes found: $DIRTY"
 
@@ -255,7 +257,6 @@ if ! git diff --quiet "$OLD_HEAD" HEAD -- server/requirements-android.txt; then
 fi
 
 cd "$SERVER"
-chmod +x start_android.sh recover_android_server.sh android_watchdog_v2.sh android_stability_check.sh 2>/dev/null || true
 "$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py || rollback_and_restart
 "$PREFIX/bin/python" preflight.py || rollback_and_restart
 env_has APP_MODE paper || rollback_and_restart
