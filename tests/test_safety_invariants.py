@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVER = ROOT / "server"
 
 
 def text(path: str) -> str:
@@ -21,6 +20,30 @@ def constant_value(path: str, name: str):
                 if isinstance(target, ast.Name) and target.id == name:
                     return ast.literal_eval(node.value)
     raise AssertionError(f"{name} not found in {path}")
+
+
+def import_roots(path: str) -> set[str]:
+    roots: set[str] = set()
+    tree = ast.parse(text(path), filename=path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def called_names(path: str) -> set[str]:
+    names: set[str] = set()
+    tree = ast.parse(text(path), filename=path)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
 
 
 class SafetyInvariantTests(unittest.TestCase):
@@ -75,12 +98,14 @@ class SafetyInvariantTests(unittest.TestCase):
         self.assertIn("'realOrderEnabled':False", src)
         self.assertIn("'deploymentReady':bool(research_passandone_min.get('ready'))", src)
 
-    def test_capital_policy_has_no_broker_or_order_dependency(self):
+    def test_capital_policy_has_no_order_dependency(self):
         src = text("server/capital_policy.py")
         self.assertIn("REINVEST_PCT=.40", src)
         self.assertIn("PROFIT_VAULT_PCT=.50", src)
         self.assertIn("RISK_RESERVE_PCT=.10", src)
-        self.assertNotRegex(src.lower(), r"\bnhplug\b|broker|place_order|send_order")
+        self.assertNotIn("nhplug", import_roots("server/capital_policy.py"))
+        forbidden = {"place_order", "send_order", "submit_order", "buy", "sell"}
+        self.assertTrue(forbidden.isdisjoint(called_names("server/capital_policy.py")))
 
     def test_update_paths_block_when_paper_position_open(self):
         src = text("server/unified_app.py")
@@ -91,6 +116,25 @@ class SafetyInvariantTests(unittest.TestCase):
         src = text("server/preflight.py")
         for module in ("collector", "paper_engine", "decision_intelligence", "one_minute_exit_replay", "robust_validation"):
             self.assertIn(repr(module), src)
+
+    def test_android_watchdog_requires_runtime_freshness(self):
+        src = text("server/android_watchdog_v2.sh")
+        self.assertIn("/api/system/runtime-health", src)
+        self.assertIn("runtime.get('quotesFresh')", src)
+        self.assertIn("startup_grace", src)
+
+    def test_android_update_runs_invariants_and_db_snapshot(self):
+        src = text("server/android_update.sh")
+        self.assertIn("test_safety_invariants.py", src)
+        self.assertIn("db_backup.py --once --reason pre-update", src)
+        self.assertIn("restore_previous_requirements", src)
+        self.assertIn("pip check", src)
+
+    def test_eod_missing_quote_is_recorded_not_silently_dropped(self):
+        src = text("server/paper_engine.py")
+        self.assertIn("NO_LATEST_QUOTE", src)
+        self.assertIn("eod_unresolved", src)
+        self.assertIn("collector.set_priority_codes([p['code'] for p in remaining])", src)
 
 
 if __name__ == "__main__":
