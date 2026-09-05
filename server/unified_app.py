@@ -21,13 +21,14 @@ from scanner_intelligence import start as scanner_intel_start,status as scanner_
 from scanner_intelligence_daemon import start as scanner_lab_start,latest as scanner_lab_latest,status as scanner_lab_status
 from decision_intelligence import start as decision_intel_start,status as decision_intel_status,report as decision_intel_report
 from one_minute_exit_replay import validation_status as one_minute_exit_status
+from research_observer import start as research_observer_start,status as research_observer_status,observation_report
 
 BASE_DIR=Path(__file__).resolve().parent
 ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-UI_VERSION='0.17.9'
+UI_VERSION='0.17.10'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
 
@@ -104,6 +105,10 @@ def quality_lab(request):
     try:return JSONResponse(data_quality_audit())
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Data Quality 오류: {type(exc).__name__}: {exc}'},500)
 
+def observation_state(request):
+    try:return JSONResponse(observation_report(int(request.query_params.get('limit','100'))))
+    except Exception as exc:return JSONResponse({'ok':False,'error':f'Research Observer 오류: {type(exc).__name__}: {exc}'},500)
+
 def stocks_lab(request):
     try:return JSONResponse({'scan':stocks_in_play_scan(int(request.query_params.get('limit','40'))),'snapshots':stocks_snapshot_stats()})
     except Exception as exc:return JSONResponse({'ok':False,'error':f'Stocks-in-Play 오류: {type(exc).__name__}: {exc}'},500)
@@ -145,13 +150,13 @@ def runtime_health(request):
         'quotesFresh':fresh,'historyPausedForLive':bool(hs.get('pausedForLive')),
         'historyLivePriority':bool(hs.get('liveSessionPriority')),
         'krOneMinuteResearch':kr_1m_status(),'scannerIntelligence':scanner_intel_status(),
-        'decisionIntelligence':decision_intel_status(),
+        'decisionIntelligence':decision_intel_status(),'researchObserver':research_observer_status(),
         'watchdogExpected':True,'atomicUpdateRollback':True,
         'newEntriesAllowedByRuntime':ok,'realOrderEnabled':False
     },200 if ok else 503)
 
 def final_research(request):return JSONResponse(research_latest())
-def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'krOneMinute':kr_1m_status(),'usResearch':us_research_status(),'scannerIntelligence':scanner_intel_status(),'scannerResearch':scanner_lab_status(),'decisionIntelligence':decision_intel_status(),'oneMinuteExitReplayConnected':True})
+def research_state(request):return JSONResponse({'ok':True,'status':research_status(),'history':history_job_status(),'krOneMinute':kr_1m_status(),'usResearch':us_research_status(),'scannerIntelligence':scanner_intel_status(),'scannerResearch':scanner_lab_status(),'decisionIntelligence':decision_intel_status(),'researchObserver':research_observer_status(),'oneMinuteExitReplayConnected':True})
 def history_status(request):return JSONResponse({'ok':True,'status':history_job_status()})
 
 def history_start(request):
@@ -166,7 +171,7 @@ def ui_health(request):
     return JSONResponse({
         'ok':True,'uiVersion':UI_VERSION,
         'strategyLab':{
-            'enabled':True,'version':'0.17.9','control':'v0.8.0 LOCKED',
+            'enabled':True,'version':'0.17.10','control':'v0.8.0 LOCKED',
             'crossTrendV2':True,'falseSignalFilter':True,'marketRegimeLab':True,
             'surgeDiscoveryLab':True,'stocksInPlay':True,'stocksInPlaySnapshots':True,
             'scannerIntelligence':True,'timeOfDayRvol':True,'rvol5':True,'rvol15':True,'rvol30':True,
@@ -179,7 +184,8 @@ def ui_health(request):
             'walkForward':True,'purgedNonOverlapWalkForward':True,'finalLockbox':True,
             'publicStrategyBenchmark':True,'publicOrbBenchmark':True,'fixedStrategyComparison':True,
             'dataQualityAudit':True,'oneMinuteExitGate':True,'automaticResearch':True,
-            'liveSessionResearchDefer':True,'overnightLab':True,'liveMutation':False
+            'pointInTimeDecisionLog':True,'forwardOutcomeLabels':True,'universeSnapshots':True,
+            'entrySequenceTelemetry':True,'liveSessionResearchDefer':True,'overnightLab':True,'liveMutation':False
         },
         'backtest':{
             'enabled':True,'engine':'precise-portfolio-v1','executionModel':'next-bar-open',
@@ -201,7 +207,9 @@ def ui_health(request):
             'oneMinuteResearchCollector':True,'liveTransport':'NH WebSocket oc',
             'historicalTransport':'NH REST period gubun=5 xtick=1','official5mProvenance':True,
             'liveFocusMax':10,'sharedRestThrottle':True,'scannerIntelUsesExtraNhRest':False,
-            'scannerIntelSnapshotSec':300,'decisionIntelSnapshotSec':300,'realOrder':False
+            'scannerIntelSnapshotSec':300,'decisionIntelSnapshotSec':300,
+            'pointInTimeDecisionLog':True,'forwardLabelsMinutes':[5,10,30,60],
+            'universeSnapshotDaily':True,'realOrder':False
         },
         'usMarket':{
             'collector':True,'researchCollector':True,'oneMinuteBars':True,'fiveMinuteBars':True,
@@ -228,7 +236,8 @@ app.router.routes.extend([
     Route('/api/strategy-lab/run',strategy_lab),Route('/api/strategy-lab/exit',exit_lab),
     Route('/api/research/market-lab',market_lab),Route('/api/research/profitability',profitability_lab),
     Route('/api/research/robust',robust_lab),Route('/api/research/benchmark',benchmark_lab),
-    Route('/api/research/data-quality',quality_lab),Route('/api/research/stocks-in-play',stocks_lab),
+    Route('/api/research/data-quality',quality_lab),Route('/api/research/observations',observation_state),
+    Route('/api/research/stocks-in-play',stocks_lab),
     Route('/api/research/scanner-intelligence',scanner_intelligence_state),
     Route('/api/research/decision-intelligence',decision_intelligence_state),
     Route('/api/research/1m-exit-replay',one_minute_exit_replay_state),
@@ -244,6 +253,7 @@ stocks_recorder_start()
 scanner_intel_start()
 decision_intel_start()
 scanner_lab_start()
+research_observer_start()
 kr_1m_start()
 us_research_start()
 research_start()

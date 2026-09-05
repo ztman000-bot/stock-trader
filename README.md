@@ -1,4 +1,4 @@
-# Stock Day Trader v0.17.9
+# Stock Day Trader v0.17.10
 
 NH PLUG 실데이터를 사용하는 **개인용 데이트레이딩 연구·Paper 운용 플랫폼**입니다. 현재 목표는 새로운 전략을 계속 추가하는 것이 아니라 데이터 품질, 의사결정 메타데이터, 리스크 검증, 체결 현실성, 서버 안정성을 단계적으로 높이는 것입니다.
 
@@ -47,6 +47,22 @@ Android는 `APP_MODE=paper` 및 `ENABLE_TRADING=false`가 로컬 `.env`에서 �
 
 Watchdog, 백업, 연구 모듈은 주문 권한을 가지지 않습니다.
 
+## v0.17.10 Research Data Expansion
+
+Control을 바꾸지 않고 **그 순간 프로그램이 무엇을 보고 왜 거래/보류했는지**를 Point-in-Time으로 축적합니다.
+
+- Scanner 의사결정: BUY_CANDIDATE / SETUP / WATCH / SHADOW_ONLY / BLOCKED 등
+- 종목별 score, indicator, 사유·차단사유, market breadth, 후보 메타데이터 저장
+- KOSPI/KOSDAQ 후보군의 상승비율·평균 등락률·거래대금 문맥 저장
+- +5/+10/+30/+60분 및 EOD 후행수익률 라벨 자동 재계산
+- 공식 NH 5분봉이 장후 덮어쓰면 후행 라벨도 다시 계산 가능
+- 날짜별 verified Universe Snapshot 저장으로 향후 생존편향 축소
+- `entriesToday`, `entry_sequence`를 별도 계측해 `MAX_DAILY_TRADES=8` 의미를 나중에 실제 데이터로 비교
+- 현재 `MAX_DAILY_TRADES=8` Control 잠금 의미는 **기존 CLOSED 거래 기준 그대로 유지**
+- 관측 모듈은 NH API 호출을 추가하지 않고 로컬 SQLite/WAL만 사용
+
+상태 API: `/api/research/observations`
+
 ## 데이터 및 Scanner
 
 ### KR
@@ -55,11 +71,12 @@ Watchdog, 백업, 연구 모듈은 주문 권한을 가지지 않습니다.
 - 과거/연구용 공식 NH 기간별시세 5분봉 provenance 별도 기록
 - Profitability/Robust 연구에는 **구조적으로 GOOD이면서 공식 NH provenance가 76봉 이상 확인된 code-day만 사용**
 - 1분봉 연구 수집: 장중 WebSocket + 장후 REST 보충
+- 1분봉 Live Focus는 열린 Paper 우선종목 → active candidates → watchlist 순으로 최대 10종목
 - Stocks-in-Play Point-in-Time 스냅샷
 - Scanner Intelligence: RVOL5/15/30/Time, Gap, ATR14%, Relative Strength, Spread, Book Imbalance
 - 선택적 OpenDART Catalyst
 
-장중 Control/Paper의 실시간 5분봉 경로는 provenance 연구 게이트와 분리되어 있으며 v0.17.9에서 매매 규칙을 변경하지 않습니다.
+장중 Control/Paper의 실시간 5분봉 경로는 provenance 연구 게이트와 분리되어 있으며 v0.17.10에서도 매매 규칙을 변경하지 않습니다.
 
 ### US
 - KR과 별도 DB/통계
@@ -108,6 +125,7 @@ Watchdog, 백업, 연구 모듈은 주문 권한을 가지지 않습니다.
 
 - Structural GOOD/PARTIAL/BAD Data Quality Audit
 - Official NH 5m provenance research gate
+- Point-in-Time Scanner Decision / Universe Snapshot 축적
 - Stocks-in-Play / Scanner Challenger Shadow 비교
 - Strategy / Exit / Pullback / Payoff 연구
 - Public-style ORB Benchmark
@@ -166,6 +184,7 @@ bash server/android_stability_check.sh
 - `/api/research/status`
 - `/api/research/final`
 - `/api/research/data-quality`
+- `/api/research/observations`
 - `/api/research/scanner-intelligence`
 - `/api/research/decision-intelligence`
 - `/api/research/1m-exit-replay`
