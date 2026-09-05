@@ -100,8 +100,21 @@ PY
 
 health_ok(){
   "$PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
-import json,time,urllib.request
+import json,time,urllib.error,urllib.request
 from datetime import datetime
+
+BASE='http://127.0.0.1:8000'
+
+def get_json(path, timeout=8):
+    try:
+        with urllib.request.urlopen(BASE+path, timeout=timeout) as r:
+            raw=r.read().decode('utf-8','ignore')
+            return r.status, json.loads(raw)
+    except urllib.error.HTTPError as e:
+        raw=e.read().decode('utf-8','ignore')
+        try: data=json.loads(raw)
+        except Exception: data={}
+        return e.code, data
 
 def age_seconds(value):
     if not value:
@@ -115,9 +128,8 @@ def age_seconds(value):
         return None
 
 try:
-    with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=8) as r:
-        d=json.loads(r.read().decode('utf-8','ignore'))
-    if r.status != 200 or not d.get('ok'):
+    status,d=get_json('/api/health')
+    if status != 200 or not d.get('ok'):
         raise SystemExit(1)
     if str(d.get('mode','')).lower() != 'paper' or bool(d.get('tradingEnabled')):
         raise SystemExit(2)
@@ -137,16 +149,26 @@ try:
             raise SystemExit(6)
 
     collector=d.get('collector') or {}
+    collector_started_age=age_seconds(collector.get('startedAt'))
     if d.get('autoStartCollector'):
         if not collector.get('running'):
             raise SystemExit(5)
         cycle_age=age_seconds(collector.get('lastCycleAt'))
-        started_age=age_seconds(collector.get('startedAt'))
         if cycle_age is None:
-            if started_age is None or started_age > 180:
+            if collector_started_age is None or collector_started_age > 180:
                 raise SystemExit(7)
         elif cycle_age > 180:
             raise SystemExit(7)
+
+    # A live collector loop can keep cycling while every NH request is failing.
+    # After a short startup grace, require the unified runtime-health endpoint,
+    # which validates actual quote freshness and live-session data priority.
+    rstatus,runtime=get_json('/api/system/runtime-health')
+    live=bool(runtime.get('liveSession'))
+    startup_grace=collector_started_age is not None and collector_started_age <= 180
+    if live and not startup_grace:
+        if rstatus != 200 or not runtime.get('ok') or not runtime.get('quotesFresh'):
+            raise SystemExit(8)
 
     raise SystemExit(0)
 except SystemExit:
@@ -194,7 +216,7 @@ fi
 echo $$ > "$PIDFILE"
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1 || true
 initial_spid=$(server_pid 2>/dev/null || true)
-log "watchdog-v2 started pid=$$ interval=${INTERVAL}s hard=${HARD_LIMIT} soft=${SOFT_LIMIT} heartbeat=${HEARTBEAT_MAX_AGE}s serverPid=${initial_spid:-none} pidSelfHeal=true"
+log "watchdog-v2 started pid=$$ interval=${INTERVAL}s hard=${HARD_LIMIT} soft=${SOFT_LIMIT} heartbeat=${HEARTBEAT_MAX_AGE}s serverPid=${initial_spid:-none} pidSelfHeal=true runtimeFreshness=true"
 
 while true; do
   sleep "$INTERVAL"
