@@ -16,3 +16,8 @@ server/stock_trader_watchdog.log
 server/remote_update.log
 # Legacy Android installer generated this local file before watchdog v2 became tracked.
 server/android_watchdog.sh
+# Runtime research caches generated locally on Windows/Android.
+server/research_latest.json
+server/scanner_intelligence_latest.json
+# Temporary local UI backups created by scanner-fix maintenance.
+*.bak_scanfix
