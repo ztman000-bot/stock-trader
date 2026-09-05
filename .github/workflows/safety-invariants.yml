@@ -22,5 +22,5 @@ jobs:
           python-version: '3.11'
       - name: Compile server sources
         run: python -m compileall -q server tests
-      - name: Run safety invariant tests
-        run: python -m unittest discover -s tests -p 'test_safety_invariants.py' -v
+      - name: Run safety and validation tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
