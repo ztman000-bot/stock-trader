@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Route
 
 import unified_app as base
+from collector import KST
+from db_backup import snapshot as db_snapshot, status as db_backup_status
 
 app = base.app
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,6 +27,10 @@ _HEARTBEAT_STARTED = False
 _HEARTBEAT_LOCK = threading.Lock()
 _WATCHDOG_GUARDIAN_STARTED = False
 _WATCHDOG_GUARDIAN_LOCK = threading.Lock()
+_DB_BACKUP_STARTED = False
+_DB_BACKUP_LOCK = threading.Lock()
+_DB_BACKUP_STATE = {'lastAttemptAt': None, 'lastResult': None, 'lastError': None}
+DB_BACKUP_AFTER_MINUTE = max(15 * 60 + 35, min(int(os.getenv('DB_BACKUP_AFTER_MINUTE', str(15 * 60 + 40))), 23 * 60 + 59))
 
 # unified_app keeps the Windows updater for laptop use. On Android we replace
 # only the update POST routes; every trading/research route remains unchanged.
@@ -33,6 +39,14 @@ app.router.routes[:] = [
     route for route in app.router.routes
     if getattr(route, 'path', None) not in _UPDATE_PATHS
 ]
+
+
+@app.middleware('http')
+async def android_mutation_guard(request, call_next):
+    """Fail closed for state-changing Android APIs outside localhost/Tailscale."""
+    if request.method.upper() in {'POST', 'PUT', 'PATCH', 'DELETE'} and not base._remote_allowed(request):
+        return JSONResponse({'ok': False, 'error': 'Android mutation API: Tailscale/localhost only'}, 403)
+    return await call_next(request)
 
 
 def _android_safety_ok():
@@ -179,6 +193,52 @@ def _start_heartbeat():
         ).start()
 
 
+def _backup_status_safe():
+    try:
+        return db_backup_status()
+    except Exception as exc:
+        return {'ok': False, 'error': f'{type(exc).__name__}: {exc}', 'orderAccess': False}
+
+
+def _backup_done_today(now):
+    latest = (_backup_status_safe().get('latest') or {}).get('modifiedAt')
+    if not latest:
+        return False
+    try:
+        return datetime.fromisoformat(str(latest)).astimezone(KST).date() == now.date()
+    except Exception:
+        return False
+
+
+def _daily_backup_loop():
+    while True:
+        try:
+            now = datetime.now(KST)
+            minute = now.hour * 60 + now.minute
+            due = now.weekday() < 5 and minute >= DB_BACKUP_AFTER_MINUTE and not base.regular_session(now)
+            if due and not _backup_done_today(now):
+                _DB_BACKUP_STATE['lastAttemptAt'] = now.isoformat(timespec='seconds')
+                result = db_snapshot('daily-after-market')
+                _DB_BACKUP_STATE['lastResult'] = result
+                _DB_BACKUP_STATE['lastError'] = None if result.get('ok') else result.get('error')
+        except Exception as exc:
+            _DB_BACKUP_STATE['lastError'] = f'{type(exc).__name__}: {exc}'
+        time.sleep(15 * 60)
+
+
+def _start_daily_backup():
+    global _DB_BACKUP_STARTED
+    with _DB_BACKUP_LOCK:
+        if _DB_BACKUP_STARTED:
+            return
+        _DB_BACKUP_STARTED = True
+        threading.Thread(
+            target=_daily_backup_loop,
+            name='android-db-backup',
+            daemon=True,
+        ).start()
+
+
 def _launch_android_update(server_pid):
     log_path = Path.home() / 'stock-trader-update.log'
     try:
@@ -284,6 +344,10 @@ def android_watchdog_status(request):
         'heartbeatAgeSec': heartbeat_age,
         'heartbeatFresh': heartbeat_age is not None and heartbeat_age <= 90,
         'updateInProgress': UPDATE_FLAG.exists(),
+        'mutationGuard': 'TAILSCALE_OR_LOCALHOST_ONLY',
+        'dailyBackupSchedulerActive': _DB_BACKUP_STARTED,
+        'dbBackup': _backup_status_safe(),
+        'dbBackupRuntime': dict(_DB_BACKUP_STATE),
         'safety': {
             'paperMode': os.getenv('APP_MODE', 'paper').lower() == 'paper',
             'realOrderEnabled': False,
@@ -294,6 +358,7 @@ def android_watchdog_status(request):
 _start_heartbeat()
 _ensure_watchdog()
 _start_watchdog_guardian()
+_start_daily_backup()
 
 app.router.routes.extend([
     Route('/api/system/update', android_update_request, methods=['POST']),

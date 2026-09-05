@@ -136,6 +136,24 @@ class SafetyInvariantTests(unittest.TestCase):
         self.assertIn("eod_unresolved", src)
         self.assertIn("collector.set_priority_codes([p['code'] for p in remaining])", src)
 
+    def test_android_state_changes_are_tailscale_or_localhost_only(self):
+        src = text("server/android_unified_app.py")
+        self.assertIn("async def android_mutation_guard", src)
+        self.assertIn("{'POST', 'PUT', 'PATCH', 'DELETE'}", src)
+        self.assertIn("base._remote_allowed(request)", src)
+        self.assertIn("Android mutation API: Tailscale/localhost only", src)
+
+    def test_android_daily_backup_is_after_market_and_orderless(self):
+        src = text("server/android_unified_app.py")
+        self.assertIn("daily-after-market", src)
+        self.assertIn("not base.regular_session(now)", src)
+        self.assertIn("_start_daily_backup()", src)
+        backup = text("server/db_backup.py")
+        self.assertIn("sqlite3.connect", backup)
+        self.assertIn("src.backup(dst", backup)
+        self.assertIn("quick_check(1)", backup)
+        self.assertNotIn("nhplug", import_roots("server/db_backup.py"))
+
 
 if __name__ == "__main__":
     unittest.main()
