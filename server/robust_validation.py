@@ -1,7 +1,10 @@
 """Robust validation v0.17.8.
-GOOD-only data, walk-forward development folds, untouched final lockbox, cost/fill stress,
-and KR 1-minute Exit Replay validation. Research only; Control/live rules are never changed.
+GOOD-only data, purged non-overlapping walk-forward development folds, untouched final lockbox,
+cost/fill stress, and KR 1-minute Exit Replay validation.
+Research only; Control/live rules are never changed.
 """
+from math import ceil
+
 from profitability_lab import (
     _candidates,_eval,FILTERS,EXIT_CONFIGS,REGIME_MODES,SURGE_MODES,
     ENTRY_MODES,PLAY_MODES,BASE_SLIPPAGE
@@ -16,14 +19,31 @@ try:
 except Exception:
     one_minute_replay_status = None
 
+WF_FOLDS=4
+WF_PURGE_DAYS=1
+WF_MIN_TRAIN_TRADES=12
+LOCKBOX_MIN_TRADES=20
 
-def _date_slices(cands,folds=4):
+
+def _date_slices(cands,folds=WF_FOLDS,purge_days=WF_PURGE_DAYS):
+    """Expanding train windows with disjoint forward tests and a purge gap.
+
+    Test dates are never reused by another test fold. The final ~20% of dates is
+    reserved as an untouched lockbox and never appears in train/test folds.
+    """
     dates=sorted({x['date'] for x in cands});n=len(dates)
-    if n<10:return [],set()
-    lock_n=max(2,int(n*.20));dev=dates[:-lock_n];lock=set(dates[-lock_n:]);chunks=[]
-    for k in range(folds):
-        cut=max(3,int(len(dev)*(.45+.10*k)));test_end=min(len(dev),cut+max(1,int(len(dev)*.15)))
-        if test_end>cut:chunks.append((set(dev[:cut]),set(dev[cut:test_end])))
+    if n<15:return [],set()
+    lock_n=max(3,int(n*.20));dev=dates[:-lock_n];lock=set(dates[-lock_n:])
+    if len(dev)<8:return [],lock
+    min_train=max(5,int(len(dev)*.40));cursor=min_train;chunks=[]
+    while len(chunks)<max(1,int(folds)) and cursor<len(dev):
+        test_start=min(len(dev),cursor+max(0,int(purge_days)))
+        if test_start>=len(dev):break
+        folds_left=max(1,int(folds)-len(chunks));available=len(dev)-test_start
+        test_len=max(1,ceil(available/folds_left));test_end=min(len(dev),test_start+test_len)
+        train=set(dev[:cursor]);test=set(dev[test_start:test_end])
+        if train and test:chunks.append((train,test))
+        cursor=test_end
     return chunks,lock
 
 
@@ -64,7 +84,7 @@ def _one_minute_status():
 
 def run_robust_validation(max_codes=40):
     cands=_candidates(max(10,min(int(max_codes),100)));folds,lockbox=_date_slices(cands);results=[]
-    for train,test in folds:
+    for fold_no,(train,test) in enumerate(folds,1):
         ranked=[]
         for f in FILTERS:
             for cfg in EXIT_CONFIGS:
@@ -73,7 +93,7 @@ def run_robust_validation(max_codes=40):
                         for em in ENTRY_MODES:
                             for pm in PLAY_MODES:
                                 m=_eval(cands,f,cfg,rm,sm,train,entry_mode=em,play_mode=pm)
-                                if m['trades']>=8:
+                                if m['trades']>=WF_MIN_TRAIN_TRADES:
                                     complexity=f['penalty']+cfg['penalty']+rm['penalty']+sm['penalty']+em['penalty']+pm['penalty']
                                     objective=m['expectancyPct']+max(-.05,min(.05,(m['profitFactor']-1)*.05))-complexity
                                     ranked.append((objective,m['profitFactor'],f,cfg,rm,sm,em,pm,m))
@@ -81,9 +101,14 @@ def run_robust_validation(max_codes=40):
         if not ranked:continue
         _,_,f,cfg,rm,sm,em,pm,tr=ranked[0]
         te=_eval(cands,f,cfg,rm,sm,test,entry_mode=em,play_mode=pm)
-        results.append({'train':tr,'test':te,'strategy':f['id'],'exit':cfg['id'],'market':rm['id'],
+        train_dates=sorted(train);test_dates=sorted(test)
+        results.append({'fold':fold_no,'train':tr,'test':te,'trainDays':len(train),'testDays':len(test),
+                        'trainStart':str(train_dates[0]),'trainEnd':str(train_dates[-1]),
+                        'testStart':str(test_dates[0]),'testEnd':str(test_dates[-1]),
+                        'strategy':f['id'],'exit':cfg['id'],'market':rm['id'],
                         'surge':sm['id'],'entry':em['id'],'play':pm['id']})
     positive=sum(1 for x in results if x['test']['profitFactor']>1 and x['test']['expectancyPct']>0)
+    required_positive=max(2,ceil(len(results)*.75)) if results else 0
     if results:
         winner=max(results,key=lambda x:(x['test']['profitFactor']>1 and x['test']['expectancyPct']>0,x['test']['expectancyPct'],x['test']['profitFactor']))
         f=next(x for x in FILTERS if x['id']==winner['strategy']);cfg=next(x for x in EXIT_CONFIGS if x['id']==winner['exit'])
@@ -95,14 +120,16 @@ def run_robust_validation(max_codes=40):
     else:
         lock={'trades':0,'profitFactor':0,'expectancyPct':0,'winRate':0,'avgWinPct':0,'avgLossPct':0,'payoffRatio':0,'maxDrawdownPct':0}
         stress=dict(lock);selected=None
-    research_pass=bool(results and positive>=max(2,len(results)-1) and lock['trades']>=10 and
+    research_pass=bool(len(results)>=3 and positive>=required_positive and lock['trades']>=LOCKBOX_MIN_TRADES and
         lock['profitFactor']>1 and lock['expectancyPct']>0 and stress['profitFactor']>=1 and stress['expectancyPct']>=0)
     one_min=_one_minute_status()
     return {'ok':True,'version':'0.17.8','researchOnly':True,'qualityGate':'GOOD_ONLY',
         'candidateTrades':len(cands),'selectedForLockbox':selected,
-        'walkForward':{'folds':len(results),'positiveFolds':positive,'results':results},
-        'lockbox':lock,'lockboxStress':stress,'oneMinuteExitValidation':one_min,
+        'walkForward':{'method':'expanding-non-overlap-purged-v2','purgeDays':WF_PURGE_DAYS,
+                       'minTrainTrades':WF_MIN_TRAIN_TRADES,'folds':len(results),
+                       'positiveFolds':positive,'requiredPositiveFolds':required_positive,'results':results},
+        'lockbox':lock,'lockboxMinTrades':LOCKBOX_MIN_TRADES,'lockboxStress':stress,'oneMinuteExitValidation':one_min,
         'pass':research_pass,'deploymentReady':bool(research_pass and one_min.get('ready')),
-        'gate':'GOOD data + walk-forward 반복 양수 + final lockbox 양수 + 2x slippage/1bar-late 방어',
+        'gate':'GOOD data + purged/non-overlap walk-forward + final lockbox>=20 trades + 2x slippage/1bar-late 방어',
         'deploymentGate':'research pass + KR 1m Exit Replay validation; NH simulation/micro-live는 별도 단계',
         'liveRuleAutoMutation':False,'realOrderEnabled':False}
