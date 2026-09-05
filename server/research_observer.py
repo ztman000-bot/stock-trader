@@ -8,10 +8,9 @@ NH backfills can replace provisional live-sampled labels.
 import json
 import sqlite3
 import threading
-import time
 from datetime import datetime, timedelta
 
-from collector import DB_PATH, KST
+from collector import DB_PATH, KST, collector, instrument_meta, universe_verified
 
 HORIZONS_MIN = (5, 10, 30, 60)
 OFFICIAL_5M_SOURCE = 'nh_period_5m'
@@ -23,11 +22,13 @@ _LOCK = threading.RLock()
 _SEEN = set()
 _STOP = threading.Event()
 _THREAD = None
+_LAST_UNIVERSE_CAPTURE_DATE = None
 _STATUS = {
     'enabled': True,
     'running': False,
     'lastRecordAt': None,
     'lastLabelAt': None,
+    'lastUniverseSnapshotDate': None,
     'lastError': None,
     'recorded': 0,
     'labelsRefreshed': 0,
@@ -77,6 +78,18 @@ def init_observer_db():
           observed_at TEXT NOT NULL,
           snapshot_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS universe_snapshots(
+          snapshot_date TEXT NOT NULL,
+          code TEXT NOT NULL,
+          selected_rank INTEGER NOT NULL,
+          name TEXT,
+          market TEXT,
+          market_cap_eok REAL,
+          captured_at TEXT NOT NULL,
+          PRIMARY KEY(snapshot_date,code)
+        );
+        CREATE INDEX IF NOT EXISTS idx_universe_snapshots_date_rank
+          ON universe_snapshots(snapshot_date,selected_rank);
         CREATE TABLE IF NOT EXISTS bar_5m_provenance(
           code TEXT NOT NULL,bucket TEXT NOT NULL,source TEXT NOT NULL,updated_at TEXT NOT NULL,
           PRIMARY KEY(code,bucket)
@@ -93,6 +106,34 @@ def _num(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def capture_universe_snapshot():
+    """Store the first verified watchlist seen for each KST trading date."""
+    global _LAST_UNIVERSE_CAPTURE_DATE
+    if not universe_verified():
+        return {'ok': False, 'reason': 'universe-not-verified'}
+    now = datetime.now(KST)
+    day = now.date().isoformat()
+    with _LOCK:
+        if _LAST_UNIVERSE_CAPTURE_DATE == day:
+            return {'ok': True, 'date': day, 'cached': True}
+    codes = list(getattr(collector, 'watchlist', []) or [])
+    if not codes:
+        return {'ok': False, 'reason': 'empty-watchlist'}
+    init_observer_db()
+    with _conn() as c:
+        for rank, code in enumerate(codes, 1):
+            meta = instrument_meta(code)
+            c.execute('''INSERT OR IGNORE INTO universe_snapshots(
+                         snapshot_date,code,selected_rank,name,market,market_cap_eok,captured_at)
+                         VALUES(?,?,?,?,?,?,?)''',
+                      (day, str(code), rank, meta.get('name') or str(code), meta.get('market'),
+                       _num(meta.get('marketCapEok')), now.isoformat()))
+    with _LOCK:
+        _LAST_UNIVERSE_CAPTURE_DATE = day
+        _STATUS['lastUniverseSnapshotDate'] = day
+    return {'ok': True, 'date': day, 'codes': len(codes)}
 
 
 def _market_context(evs):
@@ -150,6 +191,7 @@ def record_scan_observations(evs):
     if not evs:
         return {'ok': True, 'inserted': 0}
     init_observer_db()
+    capture_universe_snapshot()
     now = datetime.now(KST)
     market = _market_context(evs)
     buckets = [str((ev.get('indicators') or {}).get('bucket') or '') for ev in evs]
@@ -267,6 +309,7 @@ def refresh_outcomes(limit=1000, days=10):
 
 def observation_report(limit=100):
     init_observer_db()
+    capture_universe_snapshot()
     refresh_outcomes(limit=1000, days=10)
     limit = max(1, min(int(limit), 200))
     today = datetime.now(KST).date().isoformat()
@@ -281,11 +324,8 @@ def observation_report(limit=100):
                     ret_5m,ret_10m,ret_30m,ret_60m,ret_eod,label_count,official_label_count,labels_official
                     FROM decision_observations ORDER BY id DESC LIMIT ?''', (limit,)).fetchall()]
         market = [dict(r) for r in c.execute('SELECT bucket,observed_at,snapshot_json FROM market_observation_snapshots ORDER BY bucket DESC LIMIT 20').fetchall()]
-        try:
-            universe_days = int(c.execute('SELECT COUNT(DISTINCT snapshot_date) FROM universe_snapshots').fetchone()[0])
-            universe_rows = int(c.execute('SELECT COUNT(*) FROM universe_snapshots').fetchone()[0])
-        except sqlite3.OperationalError:
-            universe_days = universe_rows = 0
+        universe_days = int(c.execute('SELECT COUNT(DISTINCT snapshot_date) FROM universe_snapshots').fetchone()[0])
+        universe_rows = int(c.execute('SELECT COUNT(*) FROM universe_snapshots').fetchone()[0])
     return {
         'ok': True,
         'version': '0.17.10',
@@ -312,6 +352,7 @@ def _worker():
         _STATUS['running'] = True
     while not _STOP.is_set():
         try:
+            capture_universe_snapshot()
             refresh_outcomes(limit=1500, days=15)
         except Exception as exc:
             with _LOCK:
