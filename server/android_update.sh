@@ -11,9 +11,11 @@ UPDATE_FLAG="$HOME/.stock-trader-update-in-progress"
 LOG="$HOME/stock-trader-update.log"
 SERVER_LOG="$HOME/stock-trader-server.log"
 WATCHDOG="$SERVER/android_watchdog_v2.sh"
+OLD_REQ_SNAPSHOT="$HOME/.stock-trader-requirements-before-update.txt"
 OLD_HEAD=""
 NEWPID=""
 OLD_STOPPED=0
+REQS_CHANGED=0
 MAX_UPDATE_LOG_BYTES="${UPDATE_MAX_LOG_BYTES:-4194304}"
 MAX_SERVER_LOG_BYTES="${SERVER_MAX_LOG_BYTES:-8388608}"
 
@@ -168,6 +170,17 @@ stop_android_server(){
   sleep 2
 }
 
+restore_previous_requirements(){
+  [ "$REQS_CHANGED" = "1" ] || return 0
+  [ -s "$OLD_REQ_SNAPSHOT" ] || {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] previous requirements snapshot missing; cannot restore dependencies exactly"
+    return 1
+  }
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] restoring previous Android requirements"
+  "$PREFIX/bin/python" -m pip install -r "$OLD_REQ_SNAPSHOT" || return 1
+  "$PREFIX/bin/python" -m pip check || return 1
+}
+
 restart_watchdog(){
   [ -f "$WATCHDOG" ] || return 0
   local old=""
@@ -186,6 +199,7 @@ rollback_and_restart(){
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] rolling back to $OLD_HEAD"
   cd "$ROOT"
   [ -n "$OLD_HEAD" ] && git reset --hard "$OLD_HEAD" || true
+  restore_previous_requirements || echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARN: dependency restore incomplete; server restart will still be attempted"
   if health_ok; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] server already healthy after rollback"
     OLD_STOPPED=0
@@ -211,6 +225,7 @@ cleanup_exit(){
     wait_health 30 || true
   fi
   rm -f "$UPDATE_FLAG"
+  [ "$rc" = "0" ] && rm -f "$OLD_REQ_SNAPSHOT" 2>/dev/null || true
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] update flag cleared rc=$rc"
   exit "$rc"
 }
@@ -239,6 +254,7 @@ DIRTY="$(git status --porcelain --untracked-files=no)"
 
 OLD_HEAD="$(git rev-parse HEAD)"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] old HEAD=$OLD_HEAD"
+git show "$OLD_HEAD:server/requirements-android.txt" > "$OLD_REQ_SNAPSHOT" 2>/dev/null || cp "$SERVER/requirements-android.txt" "$OLD_REQ_SNAPSHOT" 2>/dev/null || true
 
 git fetch --prune origin main || fail 'git fetch failed'
 TARGET="$(git rev-parse origin/main)"
@@ -251,16 +267,27 @@ else
 fi
 
 if ! git diff --quiet "$OLD_HEAD" HEAD -- server/requirements-android.txt; then
+  REQS_CHANGED=1
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Android requirements changed; installing"
   cd "$SERVER"
   "$PREFIX/bin/python" -m pip install -r requirements-android.txt || rollback_and_restart
+  "$PREFIX/bin/python" -m pip check || rollback_and_restart
 fi
 
 cd "$SERVER"
-"$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py || rollback_and_restart
+"$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py db_backup.py || rollback_and_restart
 "$PREFIX/bin/python" preflight.py || rollback_and_restart
+cd "$ROOT"
+"$PREFIX/bin/python" -m unittest discover -s tests -p 'test_safety_invariants.py' -v || rollback_and_restart
+cd "$SERVER"
 env_has APP_MODE paper || rollback_and_restart
 env_has ENABLE_TRADING false || rollback_and_restart
+
+# Snapshot the live WAL database only after all new-code checks pass and before
+# the running server is stopped. A missing DB is allowed on a fresh installation.
+if [ -f "$SERVER/market_data.db" ]; then
+  "$PREFIX/bin/python" db_backup.py --once --reason pre-update || rollback_and_restart
+fi
 
 stop_android_server
 start_server
