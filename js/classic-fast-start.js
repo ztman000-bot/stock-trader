@@ -50,7 +50,10 @@
   }
 
   function saveStatus(data){
-    try{localStorage.setItem(STATUS_KEY,JSON.stringify({at:Date.now(),data}))}catch{}
+    try{
+      const compact={scanner:(data?.scanner||[]).slice(0,10),universe:data?.universe||{}};
+      localStorage.setItem(STATUS_KEY,JSON.stringify({at:Date.now(),data:compact}));
+    }catch{}
   }
 
   function snapResponse(res,text){
