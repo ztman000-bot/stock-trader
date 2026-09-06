@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 HOME=/data/data/com.termux/files/home
 WATCHDOG="$PWD/android_watchdog_v2.sh"
 WDPIDFILE="$HOME/stock-trader-watchdog.pid"
+REMOTE_HEALTH_ENSURE="$PWD/ensure_remote_health.sh"
 SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
@@ -40,6 +41,12 @@ fi
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 ulimit -n 4096 >/dev/null 2>&1 || true
 
+# Independent remote health process. It stays alive when uvicorn alone dies, so
+# remote monitoring can distinguish SERVER_DOWN from a fully offline phone.
+if [ -f "$REMOTE_HEALTH_ENSURE" ]; then
+  bash "$REMOTE_HEALTH_ENSURE" || echo '[WARN] Remote health beacon unavailable; Stock Trader will continue.'
+fi
+
 watchdog_pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
@@ -70,6 +77,7 @@ echo "- REAL ORDER forced OFF"
 echo "- Dedicated phone performance profile: $PHONE_PERFORMANCE_PROFILE"
 echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v2 + safe updater enabled"
+echo "- Remote health beacon v0.17.11 enabled (10-minute heartbeat + state-change alert)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
 
 # Keep one worker only. Multiple workers would duplicate collectors/research engines and NH sessions.
