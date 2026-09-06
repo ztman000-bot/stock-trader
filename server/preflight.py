@@ -17,7 +17,8 @@ def main():
     sys.path.insert(0, str(BASE))
     modules = [
         'collector', 'paper_engine', 'market_state_engine', 'decision_intelligence',
-        'kr_1m_research', 'one_minute_exit_replay', 'robust_validation'
+        'kr_1m_research', 'one_minute_exit_replay', 'robust_validation',
+        'remote_health_daemon'
     ]
     for name in modules:
         importlib.import_module(name)
