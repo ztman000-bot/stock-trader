@@ -127,9 +127,10 @@ class SafetyInvariantTests(unittest.TestCase):
         self.assertIn("runtime.get('quotesFresh')", src)
         self.assertIn("startup_grace", src)
 
-    def test_android_update_runs_invariants_and_db_snapshot(self):
+    def test_android_update_runs_full_tests_and_db_snapshot(self):
         src = text("server/android_update.sh")
-        self.assertIn("test_safety_invariants.py", src)
+        self.assertIn("unittest discover -s tests -p 'test_*.py'", src)
+        self.assertIn("bash -n start_android.sh", src)
         self.assertIn("db_backup.py --once --reason pre-update", src)
         self.assertIn("restore_previous_requirements", src)
         self.assertIn("pip check", src)
