@@ -45,6 +45,9 @@ class SafetyHardeningV01712Tests(unittest.TestCase):
         later_allowed = rh._publish_decision('SERVER_DOWN', 'HEALTHY', 61, 61)
         self.assertEqual(now_blocked, (False, True))
         self.assertEqual(later_allowed, (True, True))
+        # A failed first/heartbeat publication also respects the retry window.
+        self.assertEqual(rh._publish_decision('HEALTHY', None, 9999, 30), (False, False))
+        self.assertEqual(rh._publish_decision('HEALTHY', None, 9999, 61), (True, False))
         src = text('remote_health_daemon.py')
         self.assertIn('last_published_state = state', src)
         self.assertIn("if result.get('ok')", src)
@@ -71,12 +74,14 @@ class SafetyHardeningV01712Tests(unittest.TestCase):
                 imported.add(node.module or '')
         self.assertFalse(any('nhplug' in x.lower() or 'broker' in x.lower() for x in imported))
         self.assertIn("OFFSITE_BACKUP_ENABLED') or 'false'", src)
-        self.assertIn("'aes-256-cbc'", src)
+        self.assertIn("'-aes-256-cbc'", src)
         self.assertIn("'-pbkdf2'", src)
         self.assertIn("'-pass', 'env:STOCK_TRADER_OFFSITE_PASSPHRASE'", src)
-        self.assertIn("scheme.lower() != 'https'", src)
-        self.assertIn("'secretsExposed'] = False", src)
-        self.assertIn("'orderAccess'] = False", src)
+        self.assertIn("scheme.lower() == 'https'", src)
+        self.assertIn('http.client.HTTPSConnection', src)
+        self.assertNotIn('cipher.read_bytes()', src)
+        self.assertIn("out['secretsExposed'] = False", src)
+        self.assertIn("out['orderAccess'] = False", src)
 
     def test_offsite_daemon_starts_only_when_explicitly_enabled(self):
         ensure = text('ensure_offsite_backup.sh')
