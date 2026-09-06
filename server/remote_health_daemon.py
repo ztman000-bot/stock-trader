@@ -254,7 +254,7 @@ def _publish_decision(state, last_published_state, seconds_since_success, second
     heartbeat_due = seconds_since_success >= HEARTBEAT_INTERVAL_SEC
     change_due = changed and retry_ready
     first_due = first and retry_ready
-    return bool(first_due or heartbeat_due or change_due), bool(changed)
+    return bool(first_due or (heartbeat_due and retry_ready) or change_due), bool(changed)
 
 
 def run_once():
