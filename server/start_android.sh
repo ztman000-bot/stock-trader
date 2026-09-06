@@ -8,6 +8,7 @@ WDPIDFILE="$HOME/stock-trader-watchdog.pid"
 REMOTE_HEALTH_ENSURE="$PWD/ensure_remote_health.sh"
 REMOTE_HEALTH_GUARDIAN="$PWD/remote_health_guardian.sh"
 REMOTE_HEALTH_GUARDIAN_PIDFILE="$HOME/stock-trader-remote-health-guardian.pid"
+OFFSITE_BACKUP_ENSURE="$PWD/ensure_offsite_backup.sh"
 SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
@@ -69,6 +70,13 @@ if [ -f "$REMOTE_HEALTH_GUARDIAN" ]; then
   fi
 fi
 
+# Encrypted off-device DB backup is deliberately opt-in. The ensure script reads
+# only OFFSITE_BACKUP_ENABLED from the local .env; if false, no upload process is
+# kept alive and local WAL-safe backups continue as before.
+if [ -f "$OFFSITE_BACKUP_ENSURE" ]; then
+  bash "$OFFSITE_BACKUP_ENSURE" || echo '[WARN] Optional offsite backup unavailable; local DB backup remains active.'
+fi
+
 watchdog_pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
@@ -101,6 +109,7 @@ echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v2 + safe updater enabled"
 echo "- Remote health beacon v0.17.12 + independent guardian enabled"
 echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
+echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
 
 # Keep one worker only. Multiple workers would duplicate collectors/research engines and NH sessions.
