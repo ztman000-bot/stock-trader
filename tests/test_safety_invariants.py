@@ -114,7 +114,11 @@ class SafetyInvariantTests(unittest.TestCase):
 
     def test_preflight_imports_critical_validation_modules(self):
         src = text("server/preflight.py")
-        for module in ("collector", "paper_engine", "decision_intelligence", "one_minute_exit_replay", "robust_validation"):
+        for module in (
+            "collector", "paper_engine", "decision_intelligence",
+            "one_minute_exit_replay", "robust_validation", "network_access",
+            "remote_health_daemon", "offsite_backup",
+        ):
             self.assertIn(repr(module), src)
 
     def test_android_watchdog_requires_runtime_freshness(self):
@@ -123,9 +127,10 @@ class SafetyInvariantTests(unittest.TestCase):
         self.assertIn("runtime.get('quotesFresh')", src)
         self.assertIn("startup_grace", src)
 
-    def test_android_update_runs_invariants_and_db_snapshot(self):
+    def test_android_update_runs_full_tests_and_db_snapshot(self):
         src = text("server/android_update.sh")
-        self.assertIn("test_safety_invariants.py", src)
+        self.assertIn("unittest discover -s tests -p 'test_*.py'", src)
+        self.assertIn("bash -n start_android.sh", src)
         self.assertIn("db_backup.py --once --reason pre-update", src)
         self.assertIn("restore_previous_requirements", src)
         self.assertIn("pip check", src)
@@ -136,12 +141,15 @@ class SafetyInvariantTests(unittest.TestCase):
         self.assertIn("eod_unresolved", src)
         self.assertIn("collector.set_priority_codes([p['code'] for p in remaining])", src)
 
-    def test_android_state_changes_are_tailscale_or_localhost_only(self):
+    def test_android_all_api_methods_are_tailscale_or_localhost_only(self):
         src = text("server/android_unified_app.py")
+        net = text("server/network_access.py")
         self.assertIn("async def android_mutation_guard", src)
-        self.assertIn("{'POST', 'PUT', 'PATCH', 'DELETE'}", src)
-        self.assertIn("base._remote_allowed(request)", src)
-        self.assertIn("Android mutation API: Tailscale/localhost only", src)
+        self.assertIn("request.url.path.startswith('/api/')", src)
+        self.assertIn("is_trusted_client_host(host)", src)
+        self.assertIn("Android API: Tailscale/localhost only", src)
+        self.assertIn("100.64.0.0/10", net)
+        self.assertNotIn("host.startswith('100.')", src)
 
     def test_android_daily_backup_is_after_market_and_orderless(self):
         src = text("server/android_unified_app.py")

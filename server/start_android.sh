@@ -6,6 +6,9 @@ HOME=/data/data/com.termux/files/home
 WATCHDOG="$PWD/android_watchdog_v2.sh"
 WDPIDFILE="$HOME/stock-trader-watchdog.pid"
 REMOTE_HEALTH_ENSURE="$PWD/ensure_remote_health.sh"
+REMOTE_HEALTH_GUARDIAN="$PWD/remote_health_guardian.sh"
+REMOTE_HEALTH_GUARDIAN_PIDFILE="$HOME/stock-trader-remote-health-guardian.pid"
+OFFSITE_BACKUP_ENSURE="$PWD/ensure_offsite_backup.sh"
 SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
@@ -47,6 +50,33 @@ if [ -f "$REMOTE_HEALTH_ENSURE" ]; then
   bash "$REMOTE_HEALTH_ENSURE" || echo '[WARN] Remote health beacon unavailable; Stock Trader will continue.'
 fi
 
+remote_guardian_pid_valid(){
+  local pid="${1:-}" cmd=""
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  echo "$cmd" | grep -q 'remote_health_guardian.sh'
+}
+
+# The guardian is independent of FastAPI. If only the beacon process dies while
+# the Stock Trader server remains healthy, it will be recreated within ~60 sec.
+if [ -f "$REMOTE_HEALTH_GUARDIAN" ]; then
+  chmod +x "$REMOTE_HEALTH_GUARDIAN" 2>/dev/null || true
+  RGPID=""
+  [ -f "$REMOTE_HEALTH_GUARDIAN_PIDFILE" ] && RGPID=$(cat "$REMOTE_HEALTH_GUARDIAN_PIDFILE" 2>/dev/null || true)
+  if ! remote_guardian_pid_valid "$RGPID"; then
+    rm -f "$REMOTE_HEALTH_GUARDIAN_PIDFILE" 2>/dev/null || true
+    nohup "$REMOTE_HEALTH_GUARDIAN" >/dev/null 2>&1 &
+    echo $! > "$REMOTE_HEALTH_GUARDIAN_PIDFILE"
+  fi
+fi
+
+# Encrypted off-device DB backup is deliberately opt-in. The ensure script reads
+# only OFFSITE_BACKUP_ENABLED from the local .env; if false, no upload process is
+# kept alive and local WAL-safe backups continue as before.
+if [ -f "$OFFSITE_BACKUP_ENSURE" ]; then
+  bash "$OFFSITE_BACKUP_ENSURE" || echo '[WARN] Optional offsite backup unavailable; local DB backup remains active.'
+fi
+
 watchdog_pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
@@ -77,7 +107,9 @@ echo "- REAL ORDER forced OFF"
 echo "- Dedicated phone performance profile: $PHONE_PERFORMANCE_PROFILE"
 echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v2 + safe updater enabled"
-echo "- Remote health beacon v0.17.11 enabled (10-minute heartbeat + state-change alert)"
+echo "- Remote health beacon v0.17.12 + independent guardian enabled"
+echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
+echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
 
 # Keep one worker only. Multiple workers would duplicate collectors/research engines and NH sessions.

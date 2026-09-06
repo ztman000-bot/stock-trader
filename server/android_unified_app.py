@@ -13,6 +13,7 @@ from starlette.routing import Route
 import unified_app as base
 from collector import KST
 from db_backup import snapshot as db_snapshot, status as db_backup_status
+from network_access import is_trusted_client_host
 
 app = base.app
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,9 +44,16 @@ app.router.routes[:] = [
 
 @app.middleware('http')
 async def android_mutation_guard(request, call_next):
-    """Fail closed for state-changing Android APIs outside localhost/Tailscale."""
-    if request.method.upper() in {'POST', 'PUT', 'PATCH', 'DELETE'} and not base._remote_allowed(request):
-        return JSONResponse({'ok': False, 'error': 'Android mutation API: Tailscale/localhost only'}, 403)
+    """Fail closed for every Android API outside localhost/Tailscale.
+
+    Uvicorn intentionally listens on 0.0.0.0 so the phone's Tailscale address
+    works without discovering/binding an interface address.  The application
+    layer therefore protects *all* /api reads and writes, not only mutations.
+    Static UI files may load on a LAN address but cannot obtain API data.
+    """
+    host = (request.client.host if request.client else '') or ''
+    if request.url.path.startswith('/api/') and not is_trusted_client_host(host):
+        return JSONResponse({'ok': False, 'error': 'Android API: Tailscale/localhost only'}, 403)
     return await call_next(request)
 
 
@@ -275,7 +283,8 @@ def _launch_android_update(server_pid):
 
 
 def android_update_request(request):
-    if not base._remote_allowed(request):
+    host = (request.client.host if request.client else '') or ''
+    if not is_trusted_client_host(host):
         return JSONResponse({'ok': False, 'error': 'Tailscale/localhost only'}, 403)
     if os.name == 'nt':
         return JSONResponse({'ok': False, 'error': 'Android updater is not available on Windows.'}, 409)
@@ -344,7 +353,7 @@ def android_watchdog_status(request):
         'heartbeatAgeSec': heartbeat_age,
         'heartbeatFresh': heartbeat_age is not None and heartbeat_age <= 90,
         'updateInProgress': UPDATE_FLAG.exists(),
-        'mutationGuard': 'TAILSCALE_OR_LOCALHOST_ONLY',
+        'mutationGuard': 'ALL_API_TAILSCALE_100.64.0.0/10_OR_LOCALHOST_ONLY',
         'dailyBackupSchedulerActive': _DB_BACKUP_STARTED,
         'dbBackup': _backup_status_safe(),
         'dbBackupRuntime': dict(_DB_BACKUP_STATE),

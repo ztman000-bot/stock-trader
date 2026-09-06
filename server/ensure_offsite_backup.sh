@@ -3,11 +3,12 @@ set -euo pipefail
 
 ROOT="$HOME/stock-trader"
 SERVER="$ROOT/server"
-PIDFILE="$HOME/stock-trader-remote-health.pid"
-LOG="$HOME/stock-trader-remote-health.log"
+ENVFILE="$SERVER/.env"
+PIDFILE="$HOME/stock-trader-offsite-backup.pid"
+LOG="$HOME/stock-trader-offsite-backup.log"
 PY="/data/data/com.termux/files/usr/bin/python"
 COMPONENT_VERSION="0.17.12"
-MAX_LOG_BYTES="${REMOTE_HEALTH_MAX_LOG_BYTES:-2097152}"
+MAX_LOG_BYTES="${OFFSITE_BACKUP_MAX_LOG_BYTES:-2097152}"
 
 pid_alive(){
   local p="${1:-}"
@@ -24,7 +25,7 @@ pid_is_project_daemon(){
   local p="${1:-}" cmd=""
   pid_alive "$p" || return 1
   cmd=$(pid_cmdline "$p")
-  echo "$cmd" | grep -q 'remote_health_daemon.py --daemon'
+  echo "$cmd" | grep -q 'offsite_backup.py --daemon'
 }
 
 pid_valid(){
@@ -32,6 +33,17 @@ pid_valid(){
   pid_is_project_daemon "$p" || return 1
   cmd=$(pid_cmdline "$p")
   echo "$cmd" | grep -q -- "--instance-version $COMPONENT_VERSION"
+}
+
+stop_known_daemon(){
+  local p="${1:-}"
+  pid_is_project_daemon "$p" || return 0
+  kill -TERM "$p" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    pid_alive "$p" || break
+    sleep 0.2
+  done
+  pid_is_project_daemon "$p" && kill -KILL "$p" 2>/dev/null || true
 }
 
 rotate_log(){
@@ -46,32 +58,30 @@ rotate_log(){
 
 old=""
 [ -f "$PIDFILE" ] && old=$(cat "$PIDFILE" 2>/dev/null || true)
-if pid_valid "$old"; then
+
+# Offsite upload is explicit opt-in. Disabling the flag also shuts down a
+# previously running project daemon instead of leaving it active.
+if [ ! -f "$ENVFILE" ] || ! grep -Eiq '^OFFSITE_BACKUP_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|on)[[:space:]]*$' "$ENVFILE"; then
+  stop_known_daemon "$old"
+  rm -f "$PIDFILE" 2>/dev/null || true
   exit 0
 fi
 
-# A software update can leave the previous beacon process alive. Terminate only
-# a positively identified project daemon; never kill an unrelated reused PID.
-if pid_is_project_daemon "$old"; then
-  kill -TERM "$old" 2>/dev/null || true
-  for _ in $(seq 1 10); do
-    pid_alive "$old" || break
-    sleep 0.2
-  done
-  pid_is_project_daemon "$old" && kill -KILL "$old" 2>/dev/null || true
+if pid_valid "$old"; then
+  exit 0
 fi
+stop_known_daemon "$old"
 rm -f "$PIDFILE" 2>/dev/null || true
 
 rotate_log
-mkdir -p "$(dirname "$LOG")"
 cd "$SERVER"
-nohup "$PY" remote_health_daemon.py --daemon --instance-version "$COMPONENT_VERSION" >>"$LOG" 2>&1 &
+nohup "$PY" offsite_backup.py --daemon --instance-version "$COMPONENT_VERSION" >>"$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 sleep 1
 if ! pid_valid "$(cat "$PIDFILE" 2>/dev/null || true)"; then
-  echo '[WARN] remote health daemon failed to start; Stock Trader server will continue.'
+  echo '[WARN] offsite backup daemon failed to start; local DB backup remains active.'
   tail -n 20 "$LOG" 2>/dev/null || true
   exit 1
 fi
 
-echo "[OK] remote health daemon v$COMPONENT_VERSION started PID=$(cat "$PIDFILE")"
+echo "[OK] encrypted offsite backup daemon v$COMPONENT_VERSION started PID=$(cat "$PIDFILE")"
