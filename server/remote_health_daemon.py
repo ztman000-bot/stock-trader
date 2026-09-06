@@ -24,7 +24,7 @@ try:
 except Exception:
     pass
 
-VERSION = '0.17.11'
+VERSION = '0.17.12'
 HOME = Path.home()
 TOPIC_FILE = HOME / '.stock-trader-remote-health-topic'
 STATE_FILE = HOME / '.stock-trader-remote-health-state.json'
@@ -242,7 +242,19 @@ def publish(status, is_change=False):
         })
         if error is None:
             saved['lastPublishOkAt'] = _utc_iso()
+            saved['lastPublishedState'] = status.get('state')
         _save_state(saved)
+
+
+def _publish_decision(state, last_published_state, seconds_since_success, seconds_since_attempt):
+    """Return (publish_now, is_change) without swallowing pending state changes."""
+    first = last_published_state is None
+    changed = not first and state != last_published_state
+    retry_ready = seconds_since_attempt >= MIN_CHANGE_PUBLISH_SEC
+    heartbeat_due = seconds_since_success >= HEARTBEAT_INTERVAL_SEC
+    change_due = changed and retry_ready
+    first_due = first and retry_ready
+    return bool(first_due or heartbeat_due or change_due), bool(changed)
 
 
 def run_once():
@@ -255,19 +267,25 @@ def run_daemon():
     if not ENABLED:
         _save_state({'componentVersion': VERSION, 'enabled': False, 'lastLocalCheckAt': _utc_iso()})
         return 0
-    previous = None
-    last_publish = 0.0
+    last_published_state = None
+    last_success = 0.0
+    last_attempt = -float(MIN_CHANGE_PUBLISH_SEC)
     while True:
         started = time.time()
         status = collect_local_status()
         state = status.get('state')
-        changed = previous is not None and state != previous
-        due = (started - last_publish) >= HEARTBEAT_INTERVAL_SEC
-        change_due = changed and (started - last_publish) >= MIN_CHANGE_PUBLISH_SEC
-        if previous is None or due or change_due:
-            result = publish(status, is_change=bool(changed))
+        should_publish, is_change = _publish_decision(
+            state,
+            last_published_state,
+            started - last_success,
+            started - last_attempt,
+        )
+        if should_publish:
+            last_attempt = started
+            result = publish(status, is_change=is_change)
             if result.get('ok'):
-                last_publish = time.time()
+                last_success = time.time()
+                last_published_state = state
         else:
             saved = _load_state()
             saved.update({
@@ -275,10 +293,11 @@ def run_daemon():
                 'enabled': True,
                 'lastState': state,
                 'lastLocalCheckAt': status.get('timestamp'),
+                'lastPublishedState': last_published_state,
+                'pendingStateChange': last_published_state is not None and state != last_published_state,
                 'statusUrl': status_url(),
             })
             _save_state(saved)
-        previous = state
         elapsed = time.time() - started
         time.sleep(max(1.0, CHECK_INTERVAL_SEC - elapsed))
 
@@ -299,7 +318,11 @@ def main(argv=None):
     p.add_argument('--daemon', action='store_true')
     p.add_argument('--once', action='store_true')
     p.add_argument('--status', action='store_true')
+    p.add_argument('--instance-version', default=None)
     args = p.parse_args(argv)
+    if args.instance_version and args.instance_version != VERSION:
+        print(f'component version mismatch: requested={args.instance_version} actual={VERSION}')
+        return 2
     if args.daemon:
         return run_daemon()
     if args.once:
