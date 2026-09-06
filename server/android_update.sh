@@ -275,10 +275,13 @@ if ! git diff --quiet "$OLD_HEAD" HEAD -- server/requirements-android.txt; then
 fi
 
 cd "$SERVER"
-"$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py db_backup.py || rollback_and_restart
+"$PREFIX/bin/python" -m py_compile app.py unified_app.py android_unified_app.py db_backup.py network_access.py remote_health_daemon.py offsite_backup.py || rollback_and_restart
 "$PREFIX/bin/python" preflight.py || rollback_and_restart
+bash -n start_android.sh android_watchdog_v2.sh android_update.sh recover_android_server.sh ensure_remote_health.sh remote_health_guardian.sh ensure_offsite_backup.sh || rollback_and_restart
 cd "$ROOT"
-"$PREFIX/bin/python" -m unittest discover -s tests -p 'test_safety_invariants.py' -v || rollback_and_restart
+# Run the same complete test family as GitHub Safety Invariants. This prevents a
+# direct/unprotected main push from bypassing newly added local regression tests.
+"$PREFIX/bin/python" -m unittest discover -s tests -p 'test_*.py' -v || rollback_and_restart
 cd "$SERVER"
 env_has APP_MODE paper || rollback_and_restart
 env_has ENABLE_TRADING false || rollback_and_restart
