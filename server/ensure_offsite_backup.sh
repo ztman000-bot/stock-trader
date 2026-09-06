@@ -1,0 +1,87 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+ROOT="$HOME/stock-trader"
+SERVER="$ROOT/server"
+ENVFILE="$SERVER/.env"
+PIDFILE="$HOME/stock-trader-offsite-backup.pid"
+LOG="$HOME/stock-trader-offsite-backup.log"
+PY="/data/data/com.termux/files/usr/bin/python"
+COMPONENT_VERSION="0.17.12"
+MAX_LOG_BYTES="${OFFSITE_BACKUP_MAX_LOG_BYTES:-2097152}"
+
+pid_alive(){
+  local p="${1:-}"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+pid_cmdline(){
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true
+}
+
+pid_is_project_daemon(){
+  local p="${1:-}" cmd=""
+  pid_alive "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -q 'offsite_backup.py --daemon'
+}
+
+pid_valid(){
+  local p="${1:-}" cmd=""
+  pid_is_project_daemon "$p" || return 1
+  cmd=$(pid_cmdline "$p")
+  echo "$cmd" | grep -q -- "--instance-version $COMPONENT_VERSION"
+}
+
+stop_known_daemon(){
+  local p="${1:-}"
+  pid_is_project_daemon "$p" || return 0
+  kill -TERM "$p" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    pid_alive "$p" || break
+    sleep 0.2
+  done
+  pid_is_project_daemon "$p" && kill -KILL "$p" 2>/dev/null || true
+}
+
+rotate_log(){
+  [ -f "$LOG" ] || return 0
+  local size=0
+  size=$(wc -c < "$LOG" 2>/dev/null || echo 0)
+  if [ "${size:-0}" -gt "$MAX_LOG_BYTES" ]; then
+    mv -f "$LOG" "$LOG.1" 2>/dev/null || true
+    : > "$LOG"
+  fi
+}
+
+old=""
+[ -f "$PIDFILE" ] && old=$(cat "$PIDFILE" 2>/dev/null || true)
+
+# Offsite upload is explicit opt-in. Disabling the flag also shuts down a
+# previously running project daemon instead of leaving it active.
+if [ ! -f "$ENVFILE" ] || ! grep -Eiq '^OFFSITE_BACKUP_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes|on)[[:space:]]*$' "$ENVFILE"; then
+  stop_known_daemon "$old"
+  rm -f "$PIDFILE" 2>/dev/null || true
+  exit 0
+fi
+
+if pid_valid "$old"; then
+  exit 0
+fi
+stop_known_daemon "$old"
+rm -f "$PIDFILE" 2>/dev/null || true
+
+rotate_log
+cd "$SERVER"
+nohup "$PY" offsite_backup.py --daemon --instance-version "$COMPONENT_VERSION" >>"$LOG" 2>&1 &
+echo $! > "$PIDFILE"
+sleep 1
+if ! pid_valid "$(cat "$PIDFILE" 2>/dev/null || true)"; then
+  echo '[WARN] offsite backup daemon failed to start; local DB backup remains active.'
+  tail -n 20 "$LOG" 2>/dev/null || true
+  exit 1
+fi
+
+echo "[OK] encrypted offsite backup daemon v$COMPONENT_VERSION started PID=$(cat "$PIDFILE")"
