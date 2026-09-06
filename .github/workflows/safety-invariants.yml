@@ -22,5 +22,14 @@ jobs:
           python-version: '3.11'
       - name: Compile server sources
         run: python -m compileall -q server tests
+      - name: Validate Android shell scripts
+        run: |
+          bash -n server/start_android.sh
+          bash -n server/android_watchdog_v2.sh
+          bash -n server/android_update.sh
+          bash -n server/recover_android_server.sh
+          bash -n server/ensure_remote_health.sh
+          bash -n server/remote_health_guardian.sh
+          bash -n server/ensure_offsite_backup.sh
       - name: Run safety and validation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
