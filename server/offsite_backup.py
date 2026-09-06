@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import shutil
@@ -17,7 +18,6 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -42,6 +42,7 @@ PBKDF2_ITER = max(100_000, min(int(os.getenv('OFFSITE_BACKUP_PBKDF2_ITER', '2000
 HTTP_TIMEOUT_SEC = max(10, min(int(os.getenv('OFFSITE_BACKUP_HTTP_TIMEOUT_SEC', '60')), 300))
 DAILY_AFTER_MINUTE = max(15 * 60 + 40, min(int(os.getenv('OFFSITE_BACKUP_AFTER_MINUTE', str(16 * 60))), 23 * 60 + 59))
 DAEMON_INTERVAL_SEC = max(300, int(os.getenv('OFFSITE_BACKUP_DAEMON_SEC', '900')))
+UPLOAD_CHUNK_BYTES = max(64 * 1024, min(int(os.getenv('OFFSITE_BACKUP_CHUNK_BYTES', str(1024 * 1024))), 8 * 1024 * 1024))
 
 
 def _write_private(path: Path, data: dict):
@@ -100,9 +101,23 @@ def _passphrase():
     return ''
 
 
+def _valid_https_target(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        return bool(
+            parsed.scheme.lower() == 'https'
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except Exception:
+        return False
+
+
 def configuration_status():
-    parsed = urllib.parse.urlsplit(PUT_URL) if PUT_URL else None
-    https = bool(parsed and parsed.scheme.lower() == 'https' and parsed.netloc)
+    https = _valid_https_target(PUT_URL)
     openssl = bool(shutil.which('openssl'))
     passphrase_ready = bool(_passphrase())
     return {
@@ -116,9 +131,8 @@ def configuration_status():
 
 
 def _target_url(filename: str):
-    parsed = urllib.parse.urlsplit(PUT_URL)
-    if parsed.scheme.lower() != 'https' or not parsed.netloc:
-        raise ValueError('OFFSITE_BACKUP_PUT_URL must be an https:// URL')
+    if not _valid_https_target(PUT_URL):
+        raise ValueError('OFFSITE_BACKUP_PUT_URL must be an https:// URL without embedded credentials')
     encoded = urllib.parse.quote(filename, safe='')
     return PUT_URL.replace('{filename}', encoded) if '{filename}' in PUT_URL else PUT_URL
 
@@ -150,22 +164,46 @@ def _encrypt_snapshot(src: Path):
 
 
 def _upload(cipher: Path):
+    """Stream ciphertext over TLS without loading the database into RAM."""
     url = _target_url(cipher.name)
-    payload = cipher.read_bytes()
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.hostname
+    if not host:
+        raise ValueError('offsite backup host is missing')
+    port = parsed.port or 443
+    target = urllib.parse.urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
+    size = cipher.stat().st_size
+    digest = hashlib.sha256()
     headers = {
         'Content-Type': 'application/octet-stream',
-        'Content-Length': str(len(payload)),
+        'Content-Length': str(size),
         'X-Stock-Trader-Filename': cipher.name,
         'User-Agent': f'stock-trader-offsite-backup/{VERSION}',
     }
     if BEARER_TOKEN:
         headers['Authorization'] = f'Bearer {BEARER_TOKEN}'
-    req = urllib.request.Request(url, data=payload, method='PUT', headers=headers)
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as r:
-        if int(getattr(r, 'status', 200)) >= 400:
-            raise RuntimeError(f'backup upload HTTP {r.status}')
-        r.read(65536)
-    return len(payload), hashlib.sha256(payload).hexdigest()
+
+    conn = http.client.HTTPSConnection(host, port=port, timeout=HTTP_TIMEOUT_SEC)
+    try:
+        conn.putrequest('PUT', target, skip_accept_encoding=True)
+        for key, value in headers.items():
+            conn.putheader(key, value)
+        conn.endheaders()
+        with cipher.open('rb') as fh:
+            while True:
+                chunk = fh.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                conn.send(chunk)
+        response = conn.getresponse()
+        status = int(response.status)
+        response.read(65536)
+        if status >= 400:
+            raise RuntimeError(f'backup upload HTTP {status}')
+    finally:
+        conn.close()
+    return size, digest.hexdigest()
 
 
 def run_once():
