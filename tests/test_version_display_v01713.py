@@ -11,9 +11,19 @@ def text(path: str) -> str:
 
 
 class VersionDisplayV01713Tests(unittest.TestCase):
+    def test_classic_shell_bootstrap_is_release_versioned(self):
+        index = text('index.html')
+        self.assertIn('Stock Day Trader v0.17.13', index)
+        self.assertIn('v0.17.13 RELEASE', index)
+        self.assertIn('/js/app-safe.js?v=1788796000', index)
+        self.assertIn('/styles.css?v=1788796000', index)
+        self.assertIn('UI v0.17.10', index)
+        self.assertIn('Control v0.8.0 LOCKED', index)
+        self.assertNotIn('/js/app-safe.js?v=1788577200', index)
+
     def test_classic_loads_explicit_version_display(self):
         boot = text('js/app-safe.js')
-        self.assertIn("const ASSET_VERSION='1788795200'", boot)
+        self.assertIn("const ASSET_VERSION='1788796000'", boot)
         self.assertIn("version-display.js?v=${ASSET_VERSION}", boot)
         self.assertIn("live-app.js?v=${ASSET_VERSION}", boot)
 
@@ -36,11 +46,13 @@ class VersionDisplayV01713Tests(unittest.TestCase):
         self.assertNotIn("method:'POST'", src)
         self.assertNotIn('ENABLE_TRADING', src)
 
-    def test_service_worker_caches_version_display_release(self):
+    def test_service_worker_is_versioned_and_navigation_network_first(self):
         sw = text('sw.js')
-        self.assertIn("const ASSET_VERSION='1788795200'", sw)
+        self.assertIn("const ASSET_VERSION='1788796000'", sw)
         self.assertIn('version-display.js?v=${ASSET_VERSION}', sw)
         self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-version-display', sw)
+        self.assertIn("if(event.request.mode==='navigate')", sw)
+        self.assertIn('networkRefresh(event.request).catch', sw)
 
     def test_control_v080_real_order_lock_unchanged(self):
         app = text('server/app.py').replace(' ', '')

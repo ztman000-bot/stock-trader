@@ -1,4 +1,4 @@
-const ASSET_VERSION='1788795200';
+const ASSET_VERSION='1788796000';
 const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-version-display`;
 const CORE_ASSETS=[
   '/classic',
@@ -55,18 +55,25 @@ self.addEventListener('fetch',event=>{
     return;
   }
   if(url.origin!==self.location.origin)return;
+
+  // Navigation must be network-first. A cache-first /classic shell can keep the
+  // previous app-safe bootstrap alive after a successful Android update.
+  if(event.request.mode==='navigate'){
+    event.respondWith(
+      networkRefresh(event.request).catch(async()=>{
+        const exact=await caches.match(event.request);
+        if(exact)return exact;
+        const shell=await caches.match('/classic');
+        if(shell)return shell;
+        return new Response('OFFLINE',{status:503,statusText:'Offline'});
+      })
+    );
+    return;
+  }
+
   const refresh=networkRefresh(event.request);
   event.waitUntil(refresh.then(()=>{}).catch(()=>{}));
   event.respondWith(
-    caches.match(event.request).then(cached=>{
-      if(cached)return cached;
-      return refresh.catch(async()=>{
-        if(event.request.mode==='navigate'){
-          const shell=await caches.match('/classic');
-          if(shell)return shell;
-        }
-        return new Response('OFFLINE',{status:503,statusText:'Offline'});
-      });
-    })
+    caches.match(event.request).then(cached=>cached||refresh.catch(()=>new Response('OFFLINE',{status:503,statusText:'Offline'})))
   );
 });
