@@ -57,8 +57,8 @@ remote_guardian_pid_valid(){
   echo "$cmd" | grep -q 'remote_health_guardian.sh'
 }
 
-# The guardian is independent of FastAPI. If only the beacon process dies while
-# the Stock Trader server remains healthy, it will be recreated within ~60 sec.
+# The guardian is independent of FastAPI. v0.17.13 also lets it restore the
+# watchdog if uvicorn and its in-process watchdog guardian are both unavailable.
 if [ -f "$REMOTE_HEALTH_GUARDIAN" ]; then
   chmod +x "$REMOTE_HEALTH_GUARDIAN" 2>/dev/null || true
   RGPID=""
@@ -84,8 +84,9 @@ watchdog_pid_valid(){
   echo "$cmd" | grep -q 'android_watchdog_v2.sh'
 }
 
-# Every normal Android start also guarantees one watchdog process. Validate the
-# command line as well as PID liveness because Android may reuse stale PIDs.
+# Every normal Android start guarantees a watchdog launcher. The watchdog child
+# owns singleton locking and canonical PID registration; launchers do not write
+# the watchdog PID file and therefore cannot race each other.
 if [ "$SKIP_WATCHDOG" != "1" ] && [ -f "$WATCHDOG" ]; then
   chmod +x "$WATCHDOG" 2>/dev/null || true
   WDPID=""
@@ -93,7 +94,6 @@ if [ "$SKIP_WATCHDOG" != "1" ] && [ -f "$WATCHDOG" ]; then
   if ! watchdog_pid_valid "$WDPID"; then
     rm -f "$WDPIDFILE" 2>/dev/null || true
     nohup "$WATCHDOG" >/dev/null 2>&1 &
-    echo $! > "$WDPIDFILE"
   fi
 fi
 
@@ -106,7 +106,7 @@ echo "- Paper/research only"
 echo "- REAL ORDER forced OFF"
 echo "- Dedicated phone performance profile: $PHONE_PERFORMANCE_PROFILE"
 echo "- Realtime/API first, heavy research staggered"
-echo "- Android watchdog v2 + safe updater enabled"
+echo "- Android watchdog v0.17.13 stability guard + safe updater enabled"
 echo "- Remote health beacon v0.17.12 + independent guardian enabled"
 echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
 echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
