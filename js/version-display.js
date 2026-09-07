@@ -28,7 +28,7 @@ async function readVersions(){
   return {
     releaseVersion:reliabilityVersion||FALLBACK_RELEASE_VERSION,
     uiVersion,
-    reliabilityVersion:reliabilityVersion||FALLBACK_RELEASE_VERSION,
+    reliabilityVersion:reliabilityVersion||'N/A',
   };
 }
 
@@ -37,10 +37,10 @@ function applyVersionDisplay(v){
   if(brand)brand.innerHTML=`Stock Day Trader <span>v${v.releaseVersion} RELEASE</span>`;
 
   const sub=document.querySelector('.sub');
-  if(sub)sub.textContent=`UI v${v.uiVersion} · Reliability v${v.reliabilityVersion} · Control v${CONTROL_VERSION} LOCKED · REAL ORDER OFF`;
+  if(sub)sub.textContent=`UI v${v.uiVersion} · Reliability ${v.reliabilityVersion==='N/A'?'N/A':`v${v.reliabilityVersion}`} · Control v${CONTROL_VERSION} LOCKED · REAL ORDER OFF`;
 
   const footer=document.querySelector('footer');
-  if(footer)footer.textContent=`Stock Day Trader v${v.releaseVersion} RELEASE · UI v${v.uiVersion} · Reliability v${v.reliabilityVersion} · Control v${CONTROL_VERSION} LOCKED · REAL ORDER OFF`;
+  if(footer)footer.textContent=`Stock Day Trader v${v.releaseVersion} RELEASE · UI v${v.uiVersion} · Reliability ${v.reliabilityVersion==='N/A'?'N/A':`v${v.reliabilityVersion}`} · Control v${CONTROL_VERSION} LOCKED · REAL ORDER OFF`;
 
   document.title=`Stock Day Trader v${v.releaseVersion}`;
 }
@@ -52,7 +52,7 @@ async function refreshVersionDisplay(){
     applyVersionDisplay({
       releaseVersion:FALLBACK_RELEASE_VERSION,
       uiVersion:FALLBACK_UI_VERSION,
-      reliabilityVersion:FALLBACK_RELEASE_VERSION,
+      reliabilityVersion:'N/A',
     });
   }
 }
