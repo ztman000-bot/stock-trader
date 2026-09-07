@@ -1,7 +1,6 @@
 // Release/version display for Classic UI.
-// Keeps UI, reliability, and locked Control versions distinct so a reliability
-// patch is not mistaken for a stale or failed application update.
-const FALLBACK_RELEASE_VERSION='0.17.13';
+// Keeps release, UI, reliability, and locked Control versions distinct.
+const FALLBACK_RELEASE_VERSION='0.17.14';
 const FALLBACK_UI_VERSION='0.17.10';
 const CONTROL_VERSION='0.8.0';
 
@@ -12,11 +11,13 @@ async function getJson(path){
 }
 
 async function readVersions(){
+  let releaseVersion=FALLBACK_RELEASE_VERSION;
   let uiVersion=FALLBACK_UI_VERSION;
   let reliabilityVersion='';
 
   try{
     const status=await getJson('/api/system/update/status');
+    if(status?.releaseVersion)releaseVersion=String(status.releaseVersion);
     if(status?.uiVersion)uiVersion=String(status.uiVersion);
   }catch{}
 
@@ -26,7 +27,7 @@ async function readVersions(){
   }catch{}
 
   return {
-    releaseVersion:reliabilityVersion||FALLBACK_RELEASE_VERSION,
+    releaseVersion,
     uiVersion,
     reliabilityVersion:reliabilityVersion||'N/A',
   };
