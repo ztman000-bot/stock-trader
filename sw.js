@@ -1,19 +1,21 @@
-const CACHE='stock-day-trader-live-v1788577200-classic-fast-start';
+const ASSET_VERSION='1788795200';
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-version-display`;
 const CORE_ASSETS=[
   '/classic',
-  '/styles.css?v=1788577200',
-  '/js/app-safe.js?v=1788577200',
+  `/styles.css?v=${ASSET_VERSION}`,
+  `/js/app-safe.js?v=${ASSET_VERSION}`,
   '/js/config.js',
-  '/js/classic-fast-start.js?v=1788577200',
-  '/js/ui-polish.js?v=1788577200',
-  '/js/live-app.js?v=1788577200',
-  '/js/trade-name-fix.js?v=1788577200',
-  '/js/scanner-resilience.js?v=1788577200',
-  '/js/history-ui.js?v=1788577200',
-  '/js/strategy-lab-ui.js?v=1788577200',
-  '/js/market-lab-ui.js?v=1788577200',
-  '/js/final-results-ui.js?v=1788577200',
-  '/manifest.webmanifest?v=1788577200',
+  `/js/classic-fast-start.js?v=${ASSET_VERSION}`,
+  `/js/ui-polish.js?v=${ASSET_VERSION}`,
+  `/js/live-app.js?v=${ASSET_VERSION}`,
+  `/js/version-display.js?v=${ASSET_VERSION}`,
+  `/js/trade-name-fix.js?v=${ASSET_VERSION}`,
+  `/js/scanner-resilience.js?v=${ASSET_VERSION}`,
+  `/js/history-ui.js?v=${ASSET_VERSION}`,
+  `/js/strategy-lab-ui.js?v=${ASSET_VERSION}`,
+  `/js/market-lab-ui.js?v=${ASSET_VERSION}`,
+  `/js/final-results-ui.js?v=${ASSET_VERSION}`,
+  `/manifest.webmanifest?v=${ASSET_VERSION}`,
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
