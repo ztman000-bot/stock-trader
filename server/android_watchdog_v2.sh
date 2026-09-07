@@ -202,9 +202,10 @@ if d.get('autoStartCollector'):
         print('COLLECTOR_STALE'); raise SystemExit(0)
 
 # Runtime quote freshness is a data-quality signal, not an API-liveness signal.
-# Query it only during the live session and never restart solely for a runtime
-# freshness failure.
-if bool(collector.get('marketSession')):
+# Query it only during the live session, after the collector startup grace, and
+# never restart solely for a runtime freshness failure.
+startup_grace=collector_started_age is not None and collector_started_age <= 180
+if bool(collector.get('marketSession')) and not startup_grace:
     rstatus,runtime,rerr=get_json('/api/system/runtime-health')
     if rerr == 'TIMEOUT':
         print('RUNTIME_HTTP_TIMEOUT'); raise SystemExit(0)
