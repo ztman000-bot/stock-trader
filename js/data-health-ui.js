@@ -73,5 +73,6 @@ async function refresh(){
   }
 }
 
-function start(){ensurePanel();setTimeout(refresh,1500);setInterval(refresh,60000)}
+// Data Health can touch large research tables, so keep it deliberately low-frequency.
+function start(){ensurePanel();setTimeout(refresh,5000);setInterval(refresh,300000)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
