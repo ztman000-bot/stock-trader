@@ -1,5 +1,5 @@
-const ASSET_VERSION='1788796000';
-const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-version-display`;
+const ASSET_VERSION='1788799200';
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-data-health`;
 const CORE_ASSETS=[
   '/classic',
   `/styles.css?v=${ASSET_VERSION}`,
@@ -9,6 +9,7 @@ const CORE_ASSETS=[
   `/js/ui-polish.js?v=${ASSET_VERSION}`,
   `/js/live-app.js?v=${ASSET_VERSION}`,
   `/js/version-display.js?v=${ASSET_VERSION}`,
+  `/js/data-health-ui.js?v=${ASSET_VERSION}`,
   `/js/trade-name-fix.js?v=${ASSET_VERSION}`,
   `/js/scanner-resilience.js?v=${ASSET_VERSION}`,
   `/js/history-ui.js?v=${ASSET_VERSION}`,

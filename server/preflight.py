@@ -17,7 +17,7 @@ def main():
     sys.path.insert(0, str(BASE))
     modules = [
         'collector', 'paper_engine', 'market_state_engine', 'decision_intelligence',
-        'kr_1m_research', 'one_minute_exit_replay', 'robust_validation',
+        'kr_1m_research', 'one_minute_exit_replay', 'research_data_health', 'robust_validation',
         'network_access', 'remote_health_daemon', 'offsite_backup'
     ]
     for name in modules:
