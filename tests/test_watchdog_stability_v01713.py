@@ -42,6 +42,7 @@ class WatchdogStabilityV01713Tests(unittest.TestCase):
         self.assertIn('COLLECTOR_STALE', src)
         self.assertIn('RUNTIME_STALE', src)
         self.assertIn('restartSuppressed=true', src)
+        self.assertIn('startup_grace', src)
 
     def test_expensive_health_timeout_does_not_trigger_immediate_restart(self):
         src = text('android_watchdog_v2.sh')
@@ -55,13 +56,20 @@ class WatchdogStabilityV01713Tests(unittest.TestCase):
     def test_independent_remote_guardian_can_restore_watchdog(self):
         guardian = text('remote_health_guardian.sh')
         start = text('start_android.sh')
+        update = text('android_update.sh')
         android = text('android_unified_app.py')
+        self.assertIn('GUARDIAN_COMPONENT_VERSION="0.17.13"', guardian)
         self.assertIn('WATCHDOG="$SERVER/android_watchdog_v2.sh"', guardian)
         self.assertIn('ensure_watchdog', guardian)
         self.assertIn('watchdog restored pid=', guardian)
         self.assertIn('watchdogSupervision=true', guardian)
+        self.assertIn('stale update flag removed by guardian', guardian)
+        self.assertIn('REMOTE_HEALTH_GUARDIAN_VERSION="0.17.13"', start)
+        self.assertIn('--instance-version "$REMOTE_HEALTH_GUARDIAN_VERSION"', start)
         self.assertNotIn('echo $! > "$WDPIDFILE"', start)
         self.assertNotIn('WATCHDOG_PIDFILE.write_text(str(proc.pid)', android)
+        self.assertNotIn('echo $! > "$WDPIDFILE"', update)
+        self.assertIn('watchdog v2 refreshed PID=$current launcherPid=$launched', update)
 
     def test_control_v080_and_real_order_lock_are_unchanged(self):
         app = text('app.py')
