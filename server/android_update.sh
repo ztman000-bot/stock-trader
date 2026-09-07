@@ -183,7 +183,7 @@ restore_previous_requirements(){
 
 restart_watchdog(){
   [ -f "$WATCHDOG" ] || return 0
-  local old=""
+  local old="" launched="" current=""
   [ -f "$WDPIDFILE" ] && old=$(cat "$WDPIDFILE" 2>/dev/null || true)
   if is_watchdog_pid "$old"; then
     kill -TERM "$old" 2>/dev/null || true
@@ -191,8 +191,17 @@ restart_watchdog(){
   fi
   rm -f "$WDPIDFILE" 2>/dev/null || true
   nohup bash "$WATCHDOG" >/dev/null 2>&1 &
-  echo $! > "$WDPIDFILE"
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] watchdog v2 refreshed PID=$!"
+  launched=$!
+  for _ in $(seq 1 20); do
+    [ -f "$WDPIDFILE" ] && current=$(cat "$WDPIDFILE" 2>/dev/null || true)
+    if is_watchdog_pid "$current"; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] watchdog v2 refreshed PID=$current launcherPid=$launched"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARN: watchdog launcher PID=$launched did not register canonical PID yet; independent guardian will retry after update flag clears"
+  return 0
 }
 
 rollback_and_restart(){
