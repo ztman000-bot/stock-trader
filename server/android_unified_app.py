@@ -24,6 +24,7 @@ HEARTBEAT = Path.home() / '.stock-trader-app-heartbeat'
 WATCHDOG_PIDFILE = Path.home() / 'stock-trader-watchdog.pid'
 SERVER_PIDFILE = Path.home() / 'stock-trader-server.pid'
 UPDATE_FLAG = Path.home() / '.stock-trader-update-in-progress'
+ANDROID_RELIABILITY_VERSION = '0.17.13'
 _HEARTBEAT_STARTED = False
 _HEARTBEAT_LOCK = threading.Lock()
 _WATCHDOG_GUARDIAN_STARTED = False
@@ -33,8 +34,6 @@ _DB_BACKUP_LOCK = threading.Lock()
 _DB_BACKUP_STATE = {'lastAttemptAt': None, 'lastResult': None, 'lastError': None}
 DB_BACKUP_AFTER_MINUTE = max(15 * 60 + 35, min(int(os.getenv('DB_BACKUP_AFTER_MINUTE', str(15 * 60 + 40))), 23 * 60 + 59))
 
-# unified_app keeps the Windows updater for laptop use. On Android we replace
-# only the update POST routes; every trading/research route remains unchanged.
 _UPDATE_PATHS = {'/api/system/update', '/api/system/update/run'}
 app.router.routes[:] = [
     route for route in app.router.routes
@@ -44,13 +43,7 @@ app.router.routes[:] = [
 
 @app.middleware('http')
 async def android_mutation_guard(request, call_next):
-    """Fail closed for every Android API outside localhost/Tailscale.
-
-    Uvicorn intentionally listens on 0.0.0.0 so the phone's Tailscale address
-    works without discovering/binding an interface address.  The application
-    layer therefore protects *all* /api reads and writes, not only mutations.
-    Static UI files may load on a LAN address but cannot obtain API data.
-    """
+    """Fail closed for every Android API outside localhost/Tailscale."""
     host = (request.client.host if request.client else '') or ''
     if request.url.path.startswith('/api/') and not is_trusted_client_host(host):
         return JSONResponse({'ok': False, 'error': 'Android API: Tailscale/localhost only'}, 403)
@@ -91,11 +84,10 @@ def _pid_cmdline(pid):
 
 
 def _ensure_watchdog():
-    """Ensure exactly the tracked watchdog v2 is supervised by this app.
+    """Launch watchdog when the canonical tracked process is absent.
 
-    PID liveness alone is insufficient on Android because a stale PID can be
-    reused by an unrelated process. Command-line identity is verified before a
-    process is trusted or terminated.
+    The watchdog process itself owns singleton locking and PID registration so
+    concurrent launchers cannot create duplicate active watchdog loops.
     """
     if os.name == 'nt' or os.getenv('ANDROID_SKIP_WATCHDOG') == '1':
         return
@@ -107,8 +99,6 @@ def _ensure_watchdog():
         cmd = _pid_cmdline(old_pid)
         if 'android_watchdog_v2.sh' in cmd:
             return
-        # Only terminate the known legacy project watchdog. Never kill an
-        # unrelated process if Android has reused a stale PID.
         if 'android_watchdog.sh' in cmd:
             try:
                 os.kill(old_pid, signal.SIGTERM)
@@ -125,7 +115,7 @@ def _ensure_watchdog():
 
     try:
         ANDROID_WATCHDOG.chmod(0o755)
-        proc = subprocess.Popen(
+        subprocess.Popen(
             ['/data/data/com.termux/files/usr/bin/bash', str(ANDROID_WATCHDOG)],
             cwd=str(BASE_DIR),
             stdin=subprocess.DEVNULL,
@@ -134,7 +124,6 @@ def _ensure_watchdog():
             start_new_session=True,
             close_fds=True,
         )
-        WATCHDOG_PIDFILE.write_text(str(proc.pid), encoding='utf-8')
     except Exception:
         pass
 
@@ -145,7 +134,6 @@ def _watchdog_guardian_loop():
         try:
             _ensure_watchdog()
         except Exception:
-            # Supervision must never take the API process down.
             pass
 
 
@@ -263,8 +251,6 @@ def _launch_android_update(server_pid):
         try:
             rc = proc.wait(timeout=90)
         except subprocess.TimeoutExpired:
-            # Normal when dependency/preflight work takes longer; the detached
-            # updater remains alive and will restart the server itself.
             return
         if rc != 0:
             with base._UPDATE_LOCK:
@@ -327,6 +313,20 @@ def android_update_request(request):
     })
 
 
+def android_liveness(request):
+    """Minimal no-DB/no-research watchdog endpoint."""
+    return JSONResponse({
+        'ok': True,
+        'component': 'android-api',
+        'reliabilityVersion': ANDROID_RELIABILITY_VERSION,
+        'pid': os.getpid(),
+        'mode': os.getenv('APP_MODE', 'paper'),
+        'tradingEnabled': False,
+        'safetyOk': _android_safety_ok(),
+        'timestamp': time.time(),
+    })
+
+
 def android_watchdog_status(request):
     now = time.time()
     wd_pid = _read_pid(WATCHDOG_PIDFILE)
@@ -343,6 +343,7 @@ def android_watchdog_status(request):
     return JSONResponse({
         'ok': True,
         'platform': 'android-termux',
+        'reliabilityVersion': ANDROID_RELIABILITY_VERSION,
         'serverPid': server_pid,
         'serverPidAlive': _pid_alive(server_pid),
         'serverPidValid': 'uvicorn android_unified_app:app' in server_cmd,
@@ -370,6 +371,7 @@ _start_watchdog_guardian()
 _start_daily_backup()
 
 app.router.routes.extend([
+    Route('/api/system/liveness', android_liveness),
     Route('/api/system/update', android_update_request, methods=['POST']),
     Route('/api/system/update/run', android_update_request, methods=['POST']),
     Route('/api/system/android-watchdog', android_watchdog_status),
