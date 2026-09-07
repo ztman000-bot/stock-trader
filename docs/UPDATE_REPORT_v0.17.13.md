@@ -51,6 +51,9 @@ Watchdog restart decisions first use this endpoint with a short timeout.
 Heavy health/runtime timeouts do not by themselves trigger an immediate server
 restart when the lightweight liveness probe is healthy.
 
+The existing collector startup grace is retained before live-session runtime
+freshness is enforced.
+
 Persistent core Paper/collector failures receive a long grace period before a
 safe recovery attempt. Default: 20 consecutive watchdog cycles.
 
@@ -64,8 +67,9 @@ Concurrent launchers cannot create multiple active watchdog loops. When the
 new watchdog obtains the canonical lock, it terminates only positively
 identified duplicate `android_watchdog_v2.sh` processes.
 
-Launchers no longer write the watchdog PID file. The canonical watchdog process
-self-registers its own PID.
+Launchers, including `start_android.sh`, the in-process FastAPI guardian and the
+Android updater, no longer own watchdog PID registration. The canonical
+watchdog process self-registers its PID.
 
 ### 4. Independent watchdog supervision
 
@@ -75,6 +79,15 @@ the Android watchdog every ~60 seconds and relaunches it when missing.
 This supplements the in-process FastAPI watchdog guardian. If uvicorn dies but
 the independent remote-health guardian remains alive, it can restore the
 watchdog, which can in turn recover the server.
+
+The independent guardian itself is versioned as v0.17.13. `start_android.sh`
+validates its command line using `--instance-version 0.17.13` and replaces only
+a positively identified older project guardian. This ensures an Android update
+does not leave the v0.17.12 guardian process running indefinitely.
+
+The guardian also validates the update-in-progress PID before suppressing
+watchdog restoration. A stale or unrelated update flag is removed instead of
+permanently disabling watchdog recovery.
 
 ### 5. Better diagnostics
 
