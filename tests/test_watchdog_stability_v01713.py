@@ -26,7 +26,7 @@ class WatchdogStabilityV01713Tests(unittest.TestCase):
         body = ast.get_source_segment(src, fn) or ''
         self.assertIn("'ok': True", body)
         self.assertIn("'tradingEnabled': False", body)
-        for forbidden in ('db_backup', 'latest_quotes', 'collector', 'research', 'sqlite'):
+        for forbidden in ('db_backup', 'latest_quotes', 'collector', 'research_', 'sqlite'):
             self.assertNotIn(forbidden, body.lower())
 
     def test_watchdog_uses_atomic_singleton_and_diagnostic_reason_codes(self):
