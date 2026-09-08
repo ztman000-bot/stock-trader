@@ -1,6 +1,6 @@
 // Release/version display for Classic UI.
 // Keeps release, UI, reliability, and locked Control versions distinct.
-const FALLBACK_RELEASE_VERSION='0.17.14';
+const FALLBACK_RELEASE_VERSION='0.17.15';
 const FALLBACK_UI_VERSION='0.17.10';
 const CONTROL_VERSION='0.8.0';
 
