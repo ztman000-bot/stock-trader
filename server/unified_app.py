@@ -29,7 +29,7 @@ ROOT_DIR=BASE_DIR.parent
 DASHBOARD=BASE_DIR/'unified_dashboard.html'
 CLASSIC_INDEX=ROOT_DIR/'index.html'
 UPDATE_SCRIPT=BASE_DIR/'remote_update.cmd'
-RELEASE_VERSION='0.17.14'
+RELEASE_VERSION='0.17.15'
 UI_VERSION='0.17.10'
 _UPDATE={'running':False,'requestedAt':None,'lastError':None,'launcher':'cmd-direct'}
 _UPDATE_LOCK=threading.Lock()
@@ -190,7 +190,8 @@ def ui_health(request):
             'walkForward':True,'purgedNonOverlapWalkForward':True,'finalLockbox':True,
             'publicStrategyBenchmark':True,'publicOrbBenchmark':True,'fixedStrategyComparison':True,
             'dataQualityAudit':True,'dataHealthScore':True,'snapshotCoverageAudit':True,
-            'partial1mPriorityRepair':True,'dbLongRunAudit':True,
+            'official5mAutoRepair':True,'replayCoverageRepair':True,'forwardSnapshotCohort':True,
+            'backupFreshness':True,'partial1mPriorityRepair':True,'dbLongRunAudit':True,
             'oneMinuteExitGate':True,'automaticResearch':True,
             'pointInTimeDecisionLog':True,'forwardOutcomeLabels':True,'universeSnapshots':True,
             'entrySequenceTelemetry':True,'liveSessionResearchDefer':True,'overnightLab':True,'liveMutation':False
@@ -214,6 +215,7 @@ def ui_health(request):
         'krMarket':{
             'oneMinuteResearchCollector':True,'liveTransport':'NH WebSocket oc',
             'historicalTransport':'NH REST period gubun=5 xtick=1','official5mProvenance':True,
+            'official5mAutoRepairTargetPct':95,'official5mRepairLiveCalls':False,
             'liveFocusMax':10,'sharedRestThrottle':True,'scannerIntelUsesExtraNhRest':False,
             'scannerIntelSnapshotSec':300,'decisionIntelSnapshotSec':300,
             'snapshotCoverageMinPct':95,'partial1mRepairLiveCalls':False,

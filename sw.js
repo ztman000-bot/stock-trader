@@ -1,5 +1,5 @@
-const ASSET_VERSION='1788799200';
-const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-data-health`;
+const ASSET_VERSION='1788909000';
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-data-repair`;
 const CORE_ASSETS=[
   '/classic',
   `/styles.css?v=${ASSET_VERSION}`,
