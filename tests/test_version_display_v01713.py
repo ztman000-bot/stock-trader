@@ -15,16 +15,17 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         index = text('index.html')
         self.assertIn('Stock Day Trader v0.17.15', index)
         self.assertIn('v0.17.15 RELEASE', index)
-        self.assertIn('/js/app-safe.js?v=1788909000', index)
-        self.assertIn('/styles.css?v=1788909000', index)
+        self.assertIn('/js/app-safe.js?v=1788999000', index)
+        self.assertIn('/styles.css?v=1788999000', index)
         self.assertIn('UI v0.17.10', index)
         self.assertIn('Reliability v0.17.13', index)
         self.assertIn('Control v0.8.0 LOCKED', index)
-        self.assertNotIn('/js/app-safe.js?v=1788799200', index)
+        self.assertNotIn('/js/app-safe.js?v=1788909000', index)
 
     def test_classic_loads_version_and_data_health_modules(self):
         boot = text('js/app-safe.js')
-        self.assertIn("const ASSET_VERSION='1788909000'", boot)
+        self.assertIn("const ASSET_VERSION='1788999000'", boot)
+        self.assertIn("classic-fast-start.js?v=${ASSET_VERSION}", boot)
         self.assertIn("version-display.js?v=${ASSET_VERSION}", boot)
         self.assertIn("data-health-ui.js?v=${ASSET_VERSION}", boot)
         self.assertIn("live-app.js?v=${ASSET_VERSION}", boot)
@@ -49,7 +50,7 @@ class VersionDisplayReleaseTests(unittest.TestCase):
             self.assertNotIn("method:'POST'", src)
             self.assertNotIn('ENABLE_TRADING', src)
 
-    def test_data_health_ui_surfaces_repair_and_forward_coverage(self):
+    def test_data_health_ui_surfaces_repair_forward_coverage_and_cache(self):
         src = text('js/data-health-ui.js')
         self.assertIn('AUTO REPAIR', src)
         self.assertIn('autoRepairTargetPct', src)
@@ -57,15 +58,19 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         self.assertIn('forwardBaselineDate', src)
         self.assertIn('lastReplayRepair', src)
         self.assertIn('backupFresh', src)
+        self.assertIn('DATA_HEALTH_CACHE_KEY', src)
+        self.assertIn('restoreCachedHealth', src)
+        self.assertIn('저장값 즉시 표시', src)
 
     def test_service_worker_is_versioned_and_navigation_network_first(self):
         sw = text('sw.js')
-        self.assertIn("const ASSET_VERSION='1788909000'", sw)
+        self.assertIn("const ASSET_VERSION='1788999000'", sw)
         self.assertIn('version-display.js?v=${ASSET_VERSION}', sw)
         self.assertIn('data-health-ui.js?v=${ASSET_VERSION}', sw)
-        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-data-repair', sw)
+        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-instant-resume', sw)
         self.assertIn("if(event.request.mode==='navigate')", sw)
         self.assertIn('networkRefresh(event.request).catch', sw)
+        self.assertIn("if(url.pathname.startsWith('/api/'))", sw)
 
     def test_control_v080_real_order_lock_unchanged(self):
         app = text('server/app.py').replace(' ', '')
