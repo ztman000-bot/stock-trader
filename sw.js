@@ -1,5 +1,5 @@
 const ASSET_VERSION='1789005000';
-const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-pwa-install`;
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install`;
 const CORE_ASSETS=[
   '/classic',
   `/styles.css?v=${ASSET_VERSION}`,
