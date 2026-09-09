@@ -69,7 +69,7 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         self.assertIn('pwa-install.js?v=${ASSET_VERSION}', sw)
         self.assertIn('version-display.js?v=${ASSET_VERSION}', sw)
         self.assertIn('data-health-ui.js?v=${ASSET_VERSION}', sw)
-        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-pwa-install', sw)
+        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install', sw)
         self.assertIn("if(event.request.mode==='navigate')", sw)
         self.assertIn('networkRefresh(event.request).catch', sw)
         self.assertIn("if(url.pathname.startsWith('/api/'))", sw)
