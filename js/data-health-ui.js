@@ -1,6 +1,8 @@
-// v0.17.15 read-only Data Health panel.
+// v0.17.15 read-only Data Health panel + instant-resume UX hotfix.
 // Research/operations visibility only; never sends orders or mutates Control.
 const fmt=v=>v==null?'-':`${Number(v).toFixed(1)}%`;
+const DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v1';
+const DATA_HEALTH_CACHE_MAX_AGE=6*60*60*1000;
 
 async function getHealth(){
   const r=await fetch(`/api/research/data-health?u=${Date.now()}`,{cache:'no-store'});
@@ -47,13 +49,27 @@ function repairText(q5){
   return `AUTO REPAIR 활성 · 목표 ${fmt(q5?.autoRepairTargetPct)}`;
 }
 
-function render(h){
+function cacheRead(){
+  try{
+    const raw=localStorage.getItem(DATA_HEALTH_CACHE_KEY);
+    if(!raw)return null;
+    const saved=JSON.parse(raw),age=Date.now()-Number(saved.at||0);
+    if(age<0||age>DATA_HEALTH_CACHE_MAX_AGE||!saved.data)return null;
+    return saved;
+  }catch{return null}
+}
+
+function cacheWrite(h){
+  try{localStorage.setItem(DATA_HEALTH_CACHE_KEY,JSON.stringify({at:Date.now(),data:h}))}catch{}
+}
+
+function render(h,{cached=false,cachedAt=null}={}){
   if(!ensurePanel())return;
   const badge=document.querySelector('#dataHealthBadge');
   const score=Number(h?.score||0);
   if(badge){
-    badge.textContent=`${h?.grade||'UNKNOWN'} ${score.toFixed(1)}`;
-    badge.className='badge '+(score>=90?'ok':score>=80?'':'badbadge');
+    badge.textContent=cached?`CACHED ${score.toFixed(1)}`:`${h?.grade||'UNKNOWN'} ${score.toFixed(1)}`;
+    badge.className='badge '+(cached?'':score>=90?'ok':score>=80?'':'badbadge');
   }
   const q5=h?.fiveMinuteOfficial||{};
   const q1=h?.oneMinute||{};
@@ -62,7 +78,10 @@ function render(h){
   const ex=h?.exitReplay||{};
   const db=h?.database||{};
   const summary=document.querySelector('#dataHealthSummary');
-  if(summary)summary.innerHTML=`<b>DATA HEALTH ${score.toFixed(1)}%</b> · ${h?.grade||'-'} · Data Health v${h?.version||'-'}<br><small>수익성/실전승격 판정과 분리 · Control v0.8.0 LOCKED · REAL ORDER OFF</small>`;
+  if(summary){
+    const stamp=cached&&cachedAt?` · 저장 ${new Date(cachedAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})} · 최신화 중`:'';
+    summary.innerHTML=`<b>DATA HEALTH ${score.toFixed(1)}%</b> · ${h?.grade||'-'} · Data Health v${h?.version||'-'}${stamp}<br><small>수익성/실전승격 판정과 분리 · Control v0.8.0 LOCKED · REAL ORDER OFF</small>`;
+  }
   const grid=document.querySelector('#dataHealthGrid');
   if(grid)grid.innerHTML=[
     componentBox('5m Official GOOD',fmt(q5.officialGoodPct),`목표 ${fmt(q5.autoRepairTargetPct)} · GOOD ${q5?.researchCounts?.GOOD??'-'}`),
@@ -83,19 +102,38 @@ function render(h){
     const replayRepair=replay?.repaired?.length?`Replay 1m 복구 ${replay.repaired.length}건`:'Replay 1m 복구 대기/불필요';
     const partial=m.last1mRepair;
     const partialRepair=partial?.repaired?.length?`PARTIAL 1m 복구 ${partial.repaired.length}건`:'PARTIAL 1m 정상/대기';
-    note.textContent=`${repairText(q5)} · ${gaps.length?`Forward INCOMPLETE_DAY: ${gaps.slice(-4).join(' · ')}`:'Forward Snapshot 기준 통과/수집대기'} · ${replayRepair} · ${partialRepair} · Exit ${ex.reason||'-'}`;
+    const prefix=cached?'저장값 즉시 표시 · 공기계 최신값 확인 중 · ':'';
+    note.textContent=`${prefix}${repairText(q5)} · ${gaps.length?`Forward INCOMPLETE_DAY: ${gaps.slice(-4).join(' · ')}`:'Forward Snapshot 기준 통과/수집대기'} · ${replayRepair} · ${partialRepair} · Exit ${ex.reason||'-'}`;
   }
+}
+
+function restoreCachedHealth(){
+  const saved=cacheRead();
+  if(!saved)return false;
+  render(saved.data,{cached:true,cachedAt:saved.at});
+  return true;
 }
 
 async function refresh(){
-  try{render(await getHealth())}
-  catch(e){
+  try{
+    const h=await getHealth();
+    cacheWrite(h);
+    render(h);
+  }catch(e){
     ensurePanel();
     const s=document.querySelector('#dataHealthSummary');
-    if(s)s.textContent='Data Health 확인 실패: '+(e?.message||e);
+    if(s&&!cacheRead())s.textContent='Data Health 확인 실패: '+(e?.message||e);
+    const n=document.querySelector('#dataHealthNote');
+    if(n&&cacheRead())n.textContent=`저장값 표시 중 · 최신 확인 실패: ${e?.message||e}`;
   }
 }
 
-// Data Health touches large research tables, so keep it deliberately low-frequency.
-function start(){ensurePanel();setTimeout(refresh,5000);setInterval(refresh,300000)}
+// Show the last known read-only panel immediately, then refresh from the server.
+// Data Health touches large research tables, so ongoing refresh remains low-frequency.
+function start(){
+  ensurePanel();
+  const restored=restoreCachedHealth();
+  setTimeout(refresh,restored?250:1000);
+  setInterval(refresh,300000);
+}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
