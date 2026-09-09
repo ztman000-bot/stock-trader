@@ -1,5 +1,5 @@
-const ASSET_VERSION='1788909000';
-const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-data-repair`;
+const ASSET_VERSION='1788999000';
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-instant-resume`;
 const CORE_ASSETS=[
   '/classic',
   `/styles.css?v=${ASSET_VERSION}`,
@@ -57,8 +57,8 @@ self.addEventListener('fetch',event=>{
   }
   if(url.origin!==self.location.origin)return;
 
-  // Navigation must be network-first. A cache-first /classic shell can keep the
-  // previous app-safe bootstrap alive after a successful Android update.
+  // Navigation must be network-first. Runtime status/data caching is handled
+  // explicitly by the read-only Classic fast-resume layer, never by SW API cache.
   if(event.request.mode==='navigate'){
     event.respondWith(
       networkRefresh(event.request).catch(async()=>{
