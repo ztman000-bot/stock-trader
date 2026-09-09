@@ -15,17 +15,18 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         index = text('index.html')
         self.assertIn('Stock Day Trader v0.17.15', index)
         self.assertIn('v0.17.15 RELEASE', index)
-        self.assertIn('/js/app-safe.js?v=1788999000', index)
-        self.assertIn('/styles.css?v=1788999000', index)
+        self.assertIn('/js/app-safe.js?v=1789005000', index)
+        self.assertIn('/styles.css?v=1789005000', index)
         self.assertIn('UI v0.17.10', index)
         self.assertIn('Reliability v0.17.13', index)
         self.assertIn('Control v0.8.0 LOCKED', index)
-        self.assertNotIn('/js/app-safe.js?v=1788909000', index)
+        self.assertNotIn('/js/app-safe.js?v=1788999000', index)
 
-    def test_classic_loads_version_and_data_health_modules(self):
+    def test_classic_loads_version_data_health_and_pwa_modules(self):
         boot = text('js/app-safe.js')
-        self.assertIn("const ASSET_VERSION='1788999000'", boot)
+        self.assertIn("const ASSET_VERSION='1789005000'", boot)
         self.assertIn("classic-fast-start.js?v=${ASSET_VERSION}", boot)
+        self.assertIn("pwa-install.js?v=${ASSET_VERSION}", boot)
         self.assertIn("version-display.js?v=${ASSET_VERSION}", boot)
         self.assertIn("data-health-ui.js?v=${ASSET_VERSION}", boot)
         self.assertIn("live-app.js?v=${ASSET_VERSION}", boot)
@@ -44,7 +45,7 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         self.assertIn('REAL ORDER OFF', src)
 
     def test_display_modules_are_read_only(self):
-        for path in ('js/version-display.js', 'js/data-health-ui.js'):
+        for path in ('js/version-display.js', 'js/data-health-ui.js', 'js/pwa-install.js'):
             src = text(path)
             self.assertNotIn('/api/nh/order', src)
             self.assertNotIn("method:'POST'", src)
@@ -64,10 +65,11 @@ class VersionDisplayReleaseTests(unittest.TestCase):
 
     def test_service_worker_is_versioned_and_navigation_network_first(self):
         sw = text('sw.js')
-        self.assertIn("const ASSET_VERSION='1788999000'", sw)
+        self.assertIn("const ASSET_VERSION='1789005000'", sw)
+        self.assertIn('pwa-install.js?v=${ASSET_VERSION}', sw)
         self.assertIn('version-display.js?v=${ASSET_VERSION}', sw)
         self.assertIn('data-health-ui.js?v=${ASSET_VERSION}', sw)
-        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-instant-resume', sw)
+        self.assertIn('stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install', sw)
         self.assertIn("if(event.request.mode==='navigate')", sw)
         self.assertIn('networkRefresh(event.request).catch', sw)
         self.assertIn("if(url.pathname.startsWith('/api/'))", sw)
