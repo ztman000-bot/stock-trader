@@ -18,7 +18,7 @@ def main():
     modules = [
         'collector', 'paper_engine', 'market_state_engine', 'decision_intelligence',
         'kr_1m_research', 'one_minute_exit_replay', 'research_data_health', 'robust_validation',
-        'network_access', 'remote_health_daemon', 'offsite_backup'
+        'shadow_continuation', 'network_access', 'remote_health_daemon', 'offsite_backup'
     ]
     for name in modules:
         importlib.import_module(name)
