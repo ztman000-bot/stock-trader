@@ -10,6 +10,7 @@ REMOTE_HEALTH_GUARDIAN="$PWD/remote_health_guardian.sh"
 REMOTE_HEALTH_GUARDIAN_PIDFILE="$HOME/stock-trader-remote-health-guardian.pid"
 REMOTE_HEALTH_GUARDIAN_VERSION="0.17.13"
 OFFSITE_BACKUP_ENSURE="$PWD/ensure_offsite_backup.sh"
+SHADOW_CONTINUATION_ENSURE="$PWD/ensure_shadow_continuation.sh"
 SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
@@ -32,6 +33,7 @@ export TEMP_PHONE_SERVER="true"
 export PHONE_PERFORMANCE_PROFILE="${PHONE_PERFORMANCE_PROFILE:-dedicated}"
 export PYTHONUNBUFFERED="1"
 export PYTHONFAULTHANDLER="1"
+export SHADOW_CONTINUATION_ENABLED="${SHADOW_CONTINUATION_ENABLED:-true}"
 
 if [ "$PHONE_PERFORMANCE_PROFILE" = "dedicated" ]; then
   # Do not launch CPU-heavy labs immediately after boot. Let API/collector become responsive first.
@@ -94,6 +96,15 @@ if [ -f "$OFFSITE_BACKUP_ENSURE" ]; then
   bash "$OFFSITE_BACKUP_ENSURE" || echo '[WARN] Optional offsite backup unavailable; local DB backup remains active.'
 fi
 
+# Research-only continuation ledger. It polls only the localhost scanner API and
+# local quote/SQLite state. It deliberately keeps collecting counterfactual
+# signals after Paper daily locks but never calls an order endpoint or changes
+# Control v0.8.0.
+if [ -f "$SHADOW_CONTINUATION_ENSURE" ]; then
+  chmod +x "$SHADOW_CONTINUATION_ENSURE" 2>/dev/null || true
+  bash "$SHADOW_CONTINUATION_ENSURE" || echo '[WARN] Shadow continuation research unavailable; normal Paper/Control remains unchanged.'
+fi
+
 watchdog_pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
@@ -125,6 +136,7 @@ echo "- Dedicated phone performance profile: $PHONE_PERFORMANCE_PROFILE"
 echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v0.17.13 stability guard + safe updater enabled"
 echo "- Remote health beacon v0.17.12 + independent guardian v0.17.13 enabled"
+echo "- Same-stock reentry/after-lock Shadow continuation research enabled"
 echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
 echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
