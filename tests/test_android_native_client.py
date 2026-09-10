@@ -31,11 +31,12 @@ class AndroidNativeClientTests(unittest.TestCase):
 
     def test_control_remains_locked_and_real_orders_off(self):
         app = text('server/app.py').replace(' ', '')
+        paper = text('server/paper_engine.py').replace(' ', '')
         self.assertIn("VERSION='0.8.0'", app)
         self.assertIn('ENABLE_TRADING=False', app)
-        self.assertIn('MAX_CONSECUTIVE_LOSSES=2', app)
-        self.assertIn('MAX_OPEN_POSITIONS=2', app)
-        self.assertIn('MAX_DAILY_TRADES=8', app)
+        self.assertIn('MAX_CONSECUTIVE_LOSSES=2', paper)
+        self.assertIn('MAX_OPEN_POSITIONS=2', paper)
+        self.assertIn('MAX_DAILY_TRADES=8', paper)
 
     def test_ci_builds_installable_debug_apk(self):
         workflow = text('.github/workflows/android-client-build.yml')
