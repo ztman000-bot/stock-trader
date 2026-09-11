@@ -25,10 +25,12 @@ class NativeCompactShadowUiTests(unittest.TestCase):
         self.assertIn('상세 보기',js)
         self.assertIn('stock-trader-native-detail',js)
 
-    def test_shadow_panel_is_read_only_and_explains_control_separation(self):
+    def test_shadow_panel_reuses_shared_status_and_avoids_duplicate_scan(self):
         js=text('js/native-compact-ui.js')
-        self.assertIn('/api/paper/scan',js)
         self.assertIn('/api/mobile/status',js)
+        self.assertNotIn('/api/paper/scan',js)
+        self.assertIn('stocktrader:status-data',js)
+        self.assertIn('window.stockClassicFastStart?.latest',js)
         self.assertIn('SHADOW_ONLY',js)
         self.assertIn('동일종목 재진입 연구',js)
         self.assertIn('Control v0.8.0',js)
