@@ -7,7 +7,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
-import android.view.View;
 import android.webkit.SafeBrowsingResponse;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -27,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final String PREFS = "stock_trader_remote";
     private static final String KEY_URL = "server_url";
+    private static final String NATIVE_UI_ASSET = "/js/native-compact-ui.js?v=1789130200";
     private WebView webView;
     private TextView status;
     private String serverUrl = "";
@@ -56,40 +56,35 @@ public class MainActivity extends Activity {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(12), dp(8), dp(8), dp(8));
+        bar.setPadding(dp(10), dp(3), dp(6), dp(3));
         bar.setBackgroundColor(Color.rgb(10, 17, 26));
 
-        TextView title = new TextView(this);
-        title.setText("Stock Day Trader");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(18);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        bar.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        status = new TextView(this);
+        status.setText("● 서버 연결");
+        status.setTextColor(Color.rgb(180, 195, 208));
+        status.setTextSize(12);
+        status.setSingleLine(true);
+        bar.addView(status, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
         Button address = new Button(this);
         address.setText("주소");
+        address.setTextSize(12);
         address.setOnClickListener(v -> showServerDialog(false));
-        bar.addView(address, new LinearLayout.LayoutParams(dp(72), dp(48)));
+        bar.addView(address, new LinearLayout.LayoutParams(dp(64), dp(40)));
 
         Button reload = new Button(this);
-        reload.setText("새로고침");
+        reload.setText("↻");
+        reload.setTextSize(18);
+        reload.setContentDescription("새로고침");
         reload.setOnClickListener(v -> {
             if (webView != null && !serverUrl.isBlank()) webView.reload();
         });
-        bar.addView(reload, new LinearLayout.LayoutParams(dp(92), dp(48)));
-
-        status = new TextView(this);
-        status.setText("Tailscale 연결 후 서버 주소를 설정하세요.");
-        status.setTextColor(Color.rgb(180, 195, 208));
-        status.setTextSize(12);
-        status.setPadding(dp(12), dp(5), dp(12), dp(5));
-        status.setBackgroundColor(Color.rgb(8, 13, 20));
+        bar.addView(reload, new LinearLayout.LayoutParams(dp(48), dp(40)));
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(5, 8, 13));
 
-        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(64)));
-        root.addView(status, new LinearLayout.LayoutParams(-1, dp(28)));
+        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(46)));
         root.addView(webView, new LinearLayout.LayoutParams(-1, 0, 1f));
         setContentView(root);
     }
@@ -104,6 +99,8 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(false);
         s.setMediaPlaybackRequiresUserGesture(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
         WebView.setWebContentsDebuggingEnabled(false);
 
         webView.setWebViewClient(new WebViewClient() {
@@ -129,13 +126,16 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                status.setText("연결됨 · " + displayOrigin(url));
+                status.setText("● 연결됨 · " + displayOrigin(serverUrl));
+                status.setTextColor(Color.rgb(105, 220, 155));
+                injectNativeUi(view);
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    status.setText("연결 실패 · Tailscale/공기계 서버 상태 확인");
+                    status.setText("● 연결 실패 · Tailscale/공기계 확인");
+                    status.setTextColor(Color.rgb(240, 140, 140));
                 }
             }
 
@@ -144,6 +144,17 @@ public class MainActivity extends Activity {
                 callback.backToSafety(true);
             }
         });
+    }
+
+    private void injectNativeUi(WebView view) {
+        String js = "(function(){" +
+                "if(document.getElementById('stockTraderNativeUiScript'))return;" +
+                "var s=document.createElement('script');" +
+                "s.id='stockTraderNativeUiScript';" +
+                "s.src='" + NATIVE_UI_ASSET + "';" +
+                "document.head.appendChild(s);" +
+                "})();";
+        view.evaluateJavascript(js, null);
     }
 
     private boolean isAllowed(Uri uri) {
@@ -167,6 +178,12 @@ public class MainActivity extends Activity {
         return x;
     }
 
+    private String nativeUrl(String base) {
+        Uri uri = Uri.parse(base);
+        if ("1".equals(uri.getQueryParameter("native"))) return base;
+        return uri.buildUpon().appendQueryParameter("native", "1").build().toString();
+    }
+
     private void loadServer(String raw) {
         String normalized = normalize(raw);
         if (normalized.isBlank()) {
@@ -178,8 +195,9 @@ public class MainActivity extends Activity {
         allowedHost = uri.getHost() == null ? "" : uri.getHost();
         serverUrl = normalized;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, serverUrl).apply();
-        status.setText("연결 중 · " + displayOrigin(serverUrl));
-        webView.loadUrl(serverUrl);
+        status.setText("● 연결 중 · " + displayOrigin(serverUrl));
+        status.setTextColor(Color.rgb(180, 195, 208));
+        webView.loadUrl(nativeUrl(serverUrl));
     }
 
     private void showServerDialog(boolean required) {
@@ -218,7 +236,7 @@ public class MainActivity extends Activity {
         try {
             Uri u = Uri.parse(url);
             String port = u.getPort() > 0 ? ":" + u.getPort() : "";
-            return u.getScheme() + "://" + u.getHost() + port;
+            return u.getHost() + port;
         } catch (Exception e) {
             return "Stock Trader";
         }
