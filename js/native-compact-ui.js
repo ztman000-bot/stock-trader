@@ -3,77 +3,82 @@
 (()=>{
   const qs=new URLSearchParams(location.search);
   if(qs.get('native')!=='1')return;
+  if(window.__stockTraderNativeCompactUi)return;
+  window.__stockTraderNativeCompactUi=true;
 
   const root=document.documentElement;
   root.classList.add('native-client','native-compact');
 
-  const style=document.createElement('style');
-  style.id='nativeCompactStyle';
-  style.textContent=`
-    html.native-compact .connection-panel,
-    html.native-compact #pwaInstallStatus,
-    html.native-compact footer{display:none!important}
-    html.native-compact .topbar .sub{display:none!important}
-    html.native-compact .topbar{padding-top:8px!important;padding-bottom:8px!important}
-    html.native-compact .main-grid aside .riskbox,
-    html.native-compact .main-grid aside #killBtn,
-    html.native-compact .main-grid aside #resetBtn{display:none!important}
-    html.native-compact .main-grid aside .panel-head p{display:none!important}
-    html.native-client #nativeShadowPanel{margin-top:12px}
-    html.native-client .native-shadow-summary{line-height:1.55}
-    html.native-client .native-shadow-list{margin-top:10px;display:grid;gap:7px}
-    html.native-client .native-shadow-row{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(148,163,184,.18);border-radius:10px}
-    html.native-client .native-shadow-row small{opacity:.72}
-    html.native-client .native-shadow-tag{font-size:11px;font-weight:700;white-space:nowrap}
-    html.native-client .native-detail-note{margin-top:8px;font-size:12px;opacity:.72;line-height:1.5}
-    html.native-client #nativeUiModeBtn{min-width:74px}
-    html.native-client #nativeShadowRecent[hidden]{display:none!important}
+  if(!document.querySelector('#nativeCompactStyle')){
+    const style=document.createElement('style');
+    style.id='nativeCompactStyle';
+    style.textContent=`
+      html.native-compact .connection-panel,
+      html.native-compact #pwaInstallStatus,
+      html.native-compact footer{display:none!important}
+      html.native-compact .topbar .sub{display:none!important}
+      html.native-compact .topbar{padding-top:8px!important;padding-bottom:8px!important}
+      html.native-compact .main-grid aside .riskbox,
+      html.native-compact .main-grid aside #killBtn,
+      html.native-compact .main-grid aside #resetBtn{display:none!important}
+      html.native-compact .main-grid aside .panel-head p{display:none!important}
+      html.native-client #nativeShadowPanel{margin-top:12px}
+      html.native-client .native-shadow-summary{line-height:1.55}
+      html.native-client .native-shadow-list{margin-top:10px;display:grid;gap:7px}
+      html.native-client .native-shadow-row{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(148,163,184,.18);border-radius:10px}
+      html.native-client .native-shadow-row small{opacity:.72}
+      html.native-client .native-shadow-tag{font-size:11px;font-weight:700;white-space:nowrap}
+      html.native-client .native-detail-note{margin-top:8px;font-size:12px;opacity:.72;line-height:1.5}
+      html.native-client #nativeUiModeBtn{min-width:74px}
+      html.native-client #nativeShadowRecent[hidden]{display:none!important}
 
-    /* Information architecture v2: each bottom tab has one job. */
-    body[data-mobile-tab="home"] #nativeShadowPanel,
-    body[data-mobile-tab="home"] #dataHealthPanel{display:block!important}
-    body[data-mobile-tab="home"] #nativeShadowGrid,
-    body[data-mobile-tab="home"] #nativeShadowList,
-    body[data-mobile-tab="home"] #nativeShadowDeep,
-    body[data-mobile-tab="home"] #nativeShadowPanel .native-detail-note,
-    body[data-mobile-tab="home"] #dataHealthGrid,
-    body[data-mobile-tab="home"] #dataHealthNote{display:none!important}
-    body[data-mobile-tab="home"] #nativeResearchTabBtn{display:inline-flex!important}
+      /* Information architecture v2: each bottom tab has one job. */
+      body[data-mobile-tab="home"] #nativeShadowPanel,
+      body[data-mobile-tab="home"] #dataHealthPanel{display:block!important}
+      body[data-mobile-tab="home"] #nativeShadowGrid,
+      body[data-mobile-tab="home"] #nativeShadowList,
+      body[data-mobile-tab="home"] #nativeShadowDeep,
+      body[data-mobile-tab="home"] #nativeShadowPanel .native-detail-note,
+      body[data-mobile-tab="home"] #dataHealthGrid,
+      body[data-mobile-tab="home"] #dataHealthNote{display:none!important}
+      body[data-mobile-tab="home"] #nativeResearchTabBtn{display:inline-flex!important}
 
-    body[data-mobile-tab="top"] #nativeShadowPanel,
-    body[data-mobile-tab="top"] #dataHealthPanel{display:none!important}
+      body[data-mobile-tab="top"] #nativeShadowPanel,
+      body[data-mobile-tab="top"] #dataHealthPanel{display:none!important}
 
-    body[data-mobile-tab="chart"] #nativeShadowPanel,
-    body[data-mobile-tab="chart"] #dataHealthPanel{display:none!important}
-    body[data-mobile-tab="chart"] .native-trade-grid{display:grid!important}
-    body[data-mobile-tab="chart"] .native-trade-grid>[data-native-role="research"]{display:none!important}
-    body[data-mobile-tab="chart"] .native-paper-history{display:block!important}
+      body[data-mobile-tab="chart"] #nativeShadowPanel,
+      body[data-mobile-tab="chart"] #dataHealthPanel{display:none!important}
+      body[data-mobile-tab="chart"] .native-trade-grid{display:grid!important}
+      body[data-mobile-tab="chart"] .native-trade-grid>[data-native-role="research"]{display:none!important}
+      body[data-mobile-tab="chart"] .native-paper-history{display:block!important}
 
-    body[data-mobile-tab="learn"] #nativeShadowPanel,
-    body[data-mobile-tab="learn"] #dataHealthPanel{display:block!important}
-    html.native-compact body[data-mobile-tab="learn"] #dataHealthGrid{display:grid!important}
-    html.native-compact body[data-mobile-tab="learn"] #dataHealthNote{display:block!important}
-    body[data-mobile-tab="learn"] #nativeShadowGrid{display:grid!important}
-    body[data-mobile-tab="learn"] #nativeShadowList{display:grid!important}
-    body[data-mobile-tab="learn"] #nativeShadowDeep{display:block!important}
-    body[data-mobile-tab="learn"] #nativeShadowPanel .native-detail-note{display:block!important}
-    body[data-mobile-tab="learn"] .native-trade-grid>[data-native-role="trade"]{display:none!important}
-    body[data-mobile-tab="learn"] .native-paper-history{display:none!important}
-    body[data-mobile-tab="learn"] #nativeResearchTabBtn{display:none!important}
+      body[data-mobile-tab="learn"] #nativeShadowPanel,
+      body[data-mobile-tab="learn"] #dataHealthPanel{display:block!important}
+      html.native-compact body[data-mobile-tab="learn"] #dataHealthGrid{display:grid!important}
+      html.native-compact body[data-mobile-tab="learn"] #dataHealthNote{display:block!important}
+      body[data-mobile-tab="learn"] #nativeShadowGrid{display:grid!important}
+      body[data-mobile-tab="learn"] #nativeShadowList{display:grid!important}
+      body[data-mobile-tab="learn"] #nativeShadowDeep{display:block!important}
+      body[data-mobile-tab="learn"] #nativeShadowPanel .native-detail-note{display:block!important}
+      body[data-mobile-tab="learn"] .native-trade-grid>[data-native-role="trade"]{display:none!important}
+      body[data-mobile-tab="learn"] .native-paper-history{display:none!important}
+      body[data-mobile-tab="learn"] #nativeResearchTabBtn{display:none!important}
 
-    /* Old global 상세 보기 is replaced by clear tab roles. */
-    #nativeUiModeBtn{display:none!important}
-    body[data-mobile-tab="home"] #nativeShadowPanel .panel-head,
-    body[data-mobile-tab="home"] #dataHealthPanel .panel-head{margin-bottom:7px}
-    body[data-mobile-tab="home"] #nativeShadowSummary,
-    body[data-mobile-tab="home"] #dataHealthSummary{font-size:11px;line-height:1.45}
-    #nativeResearchTabBtn{white-space:nowrap}
-  `;
-  document.head.appendChild(style);
+      /* Old global 상세 보기 is replaced by clear tab roles. */
+      #nativeUiModeBtn{display:none!important}
+      body[data-mobile-tab="home"] #nativeShadowPanel .panel-head,
+      body[data-mobile-tab="home"] #dataHealthPanel .panel-head{margin-bottom:7px}
+      body[data-mobile-tab="home"] #nativeShadowSummary,
+      body[data-mobile-tab="home"] #dataHealthSummary{font-size:11px;line-height:1.45}
+      #nativeResearchTabBtn{white-space:nowrap}
+    `;
+    document.head.appendChild(style);
+  }
 
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
   const num=(v,d=1)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'-';
   const won=v=>Number.isFinite(Number(v))?`${Number(v)>=0?'+':''}₩${Math.round(Number(v)).toLocaleString()}`:'-';
+  let shadowBusy=false;
 
   function setDetailed(on){
     root.classList.toggle('native-compact',!on);
@@ -87,6 +92,7 @@
     try{localStorage.setItem('daytrader-mobile-tab',tab)}catch{}
     document.querySelectorAll('.mobile-nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
     try{scrollTo({top:0,behavior:'instant'})}catch{scrollTo(0,0)}
+    if(tab==='home'||tab==='learn')setTimeout(()=>refreshShadow(true),120);
   }
 
   function ensurePanel(){
@@ -117,11 +123,11 @@
     const positions=document.querySelector('#positionsBody')?.closest('article');
     const risk=document.querySelector('#riskState')?.closest('article');
     const grid=positions?.closest('.lower-grid');
-    if(grid)grid.classList.add('native-trade-grid');
-    if(positions)positions.dataset.nativeRole='trade';
-    if(risk)risk.dataset.nativeRole='research';
+    if(grid&&!grid.classList.contains('native-trade-grid'))grid.classList.add('native-trade-grid');
+    if(positions&&positions.dataset.nativeRole!=='trade')positions.dataset.nativeRole='trade';
+    if(risk&&risk.dataset.nativeRole!=='research')risk.dataset.nativeRole='research';
     const trades=document.querySelector('#tradesBody')?.closest('section');
-    if(trades)trades.classList.add('native-paper-history');
+    if(trades&&!trades.classList.contains('native-paper-history'))trades.classList.add('native-paper-history');
   }
 
   function tuneNavigation(){
@@ -171,9 +177,12 @@
     return r.json();
   }
 
-  async function refreshShadow(){
+  async function refreshShadow(force=false){
+    const tab=document.body?.dataset.mobileTab;
+    if(shadowBusy||document.hidden||(!force&&tab&&tab!=='home'&&tab!=='learn'))return;
     const panel=ensurePanel();
     if(!panel)return;
+    shadowBusy=true;
     try{
       const [scan,mobile]=await Promise.all([
         getJson(`/api/paper/scan?native_shadow=${Date.now()}`),
@@ -211,12 +220,13 @@
     }catch(err){
       const s=panel.querySelector('#nativeShadowSummary');
       if(s)s.textContent=`Shadow 상태 확인 실패: ${err?.message||err}`;
+    }finally{
+      shadowBusy=false;
     }
   }
 
   function organize(){
-    root.classList.add('native-compact');
-    try{localStorage.setItem('stock-trader-native-detail','0')}catch{}
+    if(!root.classList.contains('native-compact'))root.classList.add('native-compact');
     classifySections();
     tuneNavigation();
     ensureResearchShortcut();
@@ -226,11 +236,30 @@
     ensurePanel();
     setDetailed(false);
     organize();
-    const obs=new MutationObserver(organize);
-    obs.observe(document.documentElement,{childList:true,subtree:true});
-    setTimeout(()=>obs.disconnect(),25000);
-    refreshShadow();
-    setInterval(refreshShadow,30000);
+
+    // Bounded installation retries replace a broad subtree MutationObserver.
+    // Live status rendering rewrites many table rows; observing all childList changes
+    // made the WebView do needless work while the user was scrolling.
+    let attempts=0;
+    let installTimer=setInterval(()=>{
+      organize();
+      attempts++;
+      if(document.querySelector('.mobile-nav')||attempts>=24){
+        clearInterval(installTimer);
+        installTimer=null;
+      }
+    },350);
+
+    refreshShadow(true);
+    const shadowTimer=setInterval(()=>refreshShadow(false),30000);
+    const onVisibility=()=>{if(!document.hidden&&(document.body?.dataset.mobileTab==='home'||document.body?.dataset.mobileTab==='learn'))refreshShadow(true)};
+    document.addEventListener('visibilitychange',onVisibility);
+
+    window.addEventListener('pagehide',()=>{
+      if(installTimer)clearInterval(installTimer);
+      clearInterval(shadowTimer);
+      document.removeEventListener('visibilitychange',onVisibility);
+    },{once:true});
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
