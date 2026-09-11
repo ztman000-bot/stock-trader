@@ -1,8 +1,9 @@
-// v0.17.15 read-only Data Health panel + instant-resume UX hotfix.
+// v0.17.15 read-only Data Health panel + fast-start UX.
 // Research/operations visibility only; never sends orders or mutates Control.
 const fmt=v=>v==null?'-':`${Number(v).toFixed(1)}%`;
 const DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v1';
 const DATA_HEALTH_CACHE_MAX_AGE=6*60*60*1000;
+let dataHealthBusy=false;
 
 async function getHealth(){
   const r=await fetch(`/api/research/data-health?u=${Date.now()}`,{cache:'no-store'});
@@ -79,7 +80,7 @@ function render(h,{cached=false,cachedAt=null}={}){
   const db=h?.database||{};
   const summary=document.querySelector('#dataHealthSummary');
   if(summary){
-    const stamp=cached&&cachedAt?` · 저장 ${new Date(cachedAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})} · 최신화 중`:'';
+    const stamp=cached&&cachedAt?` · 저장 ${new Date(cachedAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})} · 백그라운드 최신화`:'';
     summary.innerHTML=`<b>DATA HEALTH ${score.toFixed(1)}%</b> · ${h?.grade||'-'} · Data Health v${h?.version||'-'}${stamp}<br><small>수익성/실전승격 판정과 분리 · Control v0.8.0 LOCKED · REAL ORDER OFF</small>`;
   }
   const grid=document.querySelector('#dataHealthGrid');
@@ -102,7 +103,7 @@ function render(h,{cached=false,cachedAt=null}={}){
     const replayRepair=replay?.repaired?.length?`Replay 1m 복구 ${replay.repaired.length}건`:'Replay 1m 복구 대기/불필요';
     const partial=m.last1mRepair;
     const partialRepair=partial?.repaired?.length?`PARTIAL 1m 복구 ${partial.repaired.length}건`:'PARTIAL 1m 정상/대기';
-    const prefix=cached?'저장값 즉시 표시 · 공기계 최신값 확인 중 · ':'';
+    const prefix=cached?'저장값 즉시 표시 · ':'';
     note.textContent=`${prefix}${repairText(q5)} · ${gaps.length?`Forward INCOMPLETE_DAY: ${gaps.slice(-4).join(' · ')}`:'Forward Snapshot 기준 통과/수집대기'} · ${replayRepair} · ${partialRepair} · Exit ${ex.reason||'-'}`;
   }
 }
@@ -115,6 +116,8 @@ function restoreCachedHealth(){
 }
 
 async function refresh(){
+  if(dataHealthBusy||document.hidden)return;
+  dataHealthBusy=true;
   try{
     const h=await getHealth();
     cacheWrite(h);
@@ -125,15 +128,45 @@ async function refresh(){
     if(s&&!cacheRead())s.textContent='Data Health 확인 실패: '+(e?.message||e);
     const n=document.querySelector('#dataHealthNote');
     if(n&&cacheRead())n.textContent=`저장값 표시 중 · 최신 확인 실패: ${e?.message||e}`;
+  }finally{
+    dataHealthBusy=false;
   }
 }
 
-// Show the last known read-only panel immediately, then refresh from the server.
-// Data Health touches large research tables, so ongoing refresh remains low-frequency.
 function start(){
   ensurePanel();
   const restored=restoreCachedHealth();
-  setTimeout(refresh,restored?250:1000);
-  setInterval(refresh,300000);
+  const nativeClient=new URLSearchParams(location.search).get('native')==='1';
+  const currentTab=()=>document.body?.dataset.mobileTab||'home';
+
+  // Do not make the large research-table query compete with the first dashboard paint.
+  // Cached health is enough for the home summary; research tab requests fresh data immediately.
+  const firstDelay=nativeClient?(restored?10000:4000):(restored?1000:1500);
+  const firstTimer=setTimeout(()=>refresh(),firstDelay);
+
+  const onClick=e=>{
+    if(e.target?.closest?.('.mobile-nav button[data-tab="learn"],#nativeResearchTabBtn'))setTimeout(refresh,120);
+  };
+  document.addEventListener('click',onClick,true);
+
+  let attrObserver=null;
+  if(document.body){
+    attrObserver=new MutationObserver(ms=>{
+      if(ms.some(m=>m.type==='attributes'&&m.attributeName==='data-mobile-tab')&&currentTab()==='learn')refresh();
+    });
+    attrObserver.observe(document.body,{attributes:true,attributeFilter:['data-mobile-tab']});
+  }
+
+  const timer=setInterval(()=>{
+    const tab=currentTab();
+    if(tab==='home'||tab==='learn')refresh();
+  },300000);
+
+  window.addEventListener('pagehide',()=>{
+    clearTimeout(firstTimer);
+    clearInterval(timer);
+    attrObserver?.disconnect();
+    document.removeEventListener('click',onClick,true);
+  },{once:true});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
