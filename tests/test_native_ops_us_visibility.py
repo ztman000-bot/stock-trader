@@ -30,8 +30,28 @@ class NativeOpsUsVisibilityTests(unittest.TestCase):
 
     def test_bootstrap_loads_visibility_module_for_native_client(self):
         src = text('js/app-safe.js')
-        self.assertIn("import('./native-ops-us-visibility.js?v=1789143000')", src)
+        self.assertIn("import('./native-ops-us-visibility.js?v=1789220000')", src)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'", src)
+
+    def test_native_visibility_does_not_watch_subtree_childlist(self):
+        src = text('js/native-ops-us-visibility.js')
+        self.assertIn("attrObserver.observe(document.body,{attributes:true,attributeFilter:['data-market','data-mobile-tab']})", src)
+        self.assertNotIn("subtree:true,childList:true,attributes:true", src)
+        self.assertNotIn("obs.observe(document.documentElement,{subtree:true,childList:true", src)
+        self.assertIn('paperBusy', src)
+        self.assertIn('usBusy', src)
+        self.assertIn('document.hidden', src)
+        self.assertIn('__stockTraderNativeOpsUsVisibility', src)
+
+    def test_native_compact_and_deep_shadow_avoid_continuous_dom_observers(self):
+        compact = text('js/native-compact-ui.js')
+        client = text('js/native-client-fixes.js')
+        self.assertNotIn('new MutationObserver(organize)', compact)
+        self.assertNotIn('obs.observe(document.documentElement,{subtree:true,childList:true})', client)
+        self.assertIn('shadowBusy', compact)
+        self.assertIn('deepShadowBusy', client)
+        self.assertIn('document.hidden', compact)
+        self.assertIn('document.hidden', client)
 
     def test_control_constants_are_unchanged(self):
         paper = text('server/paper_engine.py').replace(' ', '')
