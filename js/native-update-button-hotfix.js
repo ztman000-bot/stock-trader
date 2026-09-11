@@ -1,6 +1,6 @@
 // Native Android server-update button hotfix.
-// Avoids window.confirm(), which is not reliable in the minimal WebView shell
-// without a WebChromeClient. Uses an explicit two-tap confirmation instead.
+// Avoids JavaScript modal confirmation because the minimal WebView shell does
+// not provide a WebChromeClient. Uses an explicit two-tap confirmation instead.
 (()=>{
   if(new URLSearchParams(location.search).get('native')!=='1')return;
 
