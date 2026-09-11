@@ -29,9 +29,9 @@ class NativeAssetCacheRefreshTests(unittest.TestCase):
         app=text('js/app-safe.js')
         index=text('index.html')
         self.assertIn("const ASSET_VERSION='1789143000'",app)
-        self.assertIn("native-client-fixes.js?v=${ASSET_VERSION}",app)
-        self.assertIn("native-update-button-hotfix.js?v=${ASSET_VERSION}",app)
-        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}",app)
+        self.assertIn("import('./native-client-fixes.js?v=1789143000')",app)
+        self.assertIn("import('./native-update-button-hotfix.js?v=1789143000')",app)
+        self.assertIn("import('./native-ops-us-visibility.js?v=1789143000')",app)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'",app)
         self.assertIn('/js/app-safe.js?v=1789143000',index)
 
