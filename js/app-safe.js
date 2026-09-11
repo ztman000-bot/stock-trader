@@ -5,9 +5,14 @@ const showBootError=err=>{console.error('Stock Day Trader boot error:',err);cons
 window.addEventListener('error',e=>showBootError(e.error||e.message));window.addEventListener('unhandledrejection',e=>showBootError(e.reason));
 
 const ASSET_VERSION='1789005000';
+const nativeClient=new URLSearchParams(location.search).get('native')==='1';
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register(`/sw.js?v=${ASSET_VERSION}`,{updateViaCache:'none'}).catch(()=>{});
+}
+
+if(nativeClient){
+  import('./native-client-fixes.js?v=1789137600').catch(showBootError);
 }
 
 const liveClassic=location.pathname==='/classic'||location.pathname.startsWith('/classic/');
