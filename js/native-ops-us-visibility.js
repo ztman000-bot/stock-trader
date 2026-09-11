@@ -2,12 +2,176 @@
 // No order endpoints, no Paper mutations, no Control rule changes.
 (()=>{
   if(new URLSearchParams(location.search).get('native')!=='1')return;
-  const style=document.createElement('style');style.id='nativeOpsUsVisibility';style.textContent=`html.native-client.native-compact body[data-mobile-tab="home"] .main-grid aside .riskbox{display:grid!important;margin-top:10px}html.native-client #nativePaperPolicy{margin-top:9px;font-size:10px;line-height:1.55}html.native-client #nativePaperPolicy strong{font-size:11px}html.native-client #nativeUsResearchPanel{margin-top:10px}html.native-client .native-us-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px}html.native-client .native-us-grid>div{background:rgba(18,36,58,.65);border:1px solid var(--line);border-radius:10px;padding:9px;min-width:0}html.native-client .native-us-grid small{display:block;color:var(--muted);font-size:9px}html.native-client .native-us-grid strong{display:block;margin-top:3px;font-size:13px;overflow:hidden;text-overflow:ellipsis}html.native-client .native-us-off{margin-top:9px;padding:9px;border:1px solid rgba(245,158,11,.35);border-radius:10px;background:rgba(120,74,10,.12);font-size:10px;line-height:1.55}html.native-client .native-us-latest{display:grid;gap:5px;margin-top:8px}html.native-client .native-us-row{display:flex;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid rgba(148,163,184,.15);border-radius:8px;font-size:10px}`;document.head.appendChild(style);
-  const num=v=>Number.isFinite(Number(v))?Number(v):0,fmtInt=v=>Math.round(num(v)).toLocaleString(),shortTime=v=>{if(!v)return'-';try{return new Date(v).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})}catch{return String(v)}};
-  async function json(url){const r=await fetch(url,{cache:'no-store'});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d?.error||d?.detail||`HTTP ${r.status}`);return d}
-  function ensurePaperPolicy(){const aside=document.querySelector('.main-grid aside'),risk=aside?.querySelector('.riskbox');if(!aside||!risk)return null;let box=aside.querySelector('#nativePaperPolicy');if(!box){box=document.createElement('div');box.id='nativePaperPolicy';box.className='backtest-box';box.textContent='서버 Paper 통제 규칙 확인 중...';risk.insertAdjacentElement('afterend',box)}const title=aside.querySelector('.panel-head h2');if(title)title.textContent='자동매매 제어 · SERVER PAPER';const toggle=aside.querySelector('.toggle-row');if(toggle)toggle.title='표시 전용입니다. 자동매매는 공기계 서버 Paper 루프가 통제합니다.';return box}
-  async function refreshPaperPolicy(){const box=ensurePaperPolicy();if(!box)return;try{const d=await json(`/api/mobile/status?native_policy=${Date.now()}`),daily=d?.daily||{},loop=d?.paperLoop||{},risk=d?.risk||{};const riskTrade=document.querySelector('#riskTradeText')?.textContent||'0.35%',exit=document.querySelector('#exitText')?.textContent||'-1.0% 손절 · +1.5% Trail 시작 · 0.8% Trail',maxPos=risk.maxOpenPositions||document.querySelector('#maxPositionsText')?.textContent||'2',lossLimit=Math.abs(num(daily.lossLimit));box.innerHTML=`<strong>${loop.running?'자동 Paper 루프 RUNNING':'자동 Paper 루프 CHECK'} · 앱 스위치 조작 불가 · REAL ORDER OFF</strong><br>진입 ${d.entryStart||'09:30'}~${d.entryCutoff||'14:50'} · EOD ${d.eodExit||'15:15'} · 1회 리스크 ${riskTrade} · 동시 ${maxPos}<br>${exit} · 2연속 손실 Lock · 일손실 ${lossLimit?`₩${fmtInt(lossLimit)}`:'0.75%'} Lock · 일 최대 ${daily.maxDailyTrades||8}건`}catch(e){box.textContent=`서버 Paper 통제 상태 확인 실패: ${e?.message||e}`}}
-  function ensureUsPanel(){const host=document.querySelector('.us-dashboard');if(!host)return null;let panel=host.querySelector('#nativeUsResearchPanel');if(!panel){panel=document.createElement('div');panel.id='nativeUsResearchPanel';panel.className='backtest-box';panel.innerHTML='<b>미국 데이터·연구 상태</b><div class="native-us-grid"><div>확인 중...</div></div>';host.appendChild(panel)}const head=host.querySelector('.panel-head h2');if(head)head.textContent='🇺🇸 US 데이터·연구';const sub=host.querySelector('.panel-head p');if(sub)sub.textContent='NH PLUG 해외주식 · 데이터/연구 수집 · Paper/실주문 OFF';return panel}
-  async function refreshUs(){const panel=ensureUsPanel();if(!panel)return;try{const [u,r]=await Promise.all([json(`/api/us/status?native_us=${Date.now()}`),json(`/api/us/research/status?native_us=${Date.now()}`)]),c=u?.collector||{},s=r?.status||{},latest=Array.isArray(r?.latest)?r.latest.slice(0,5):[];panel.innerHTML=`<b>미국 데이터·연구 상태</b><div class="native-us-grid"><div><small>현재가 Collector</small><strong>${c.running?'RUNNING':'STOPPED'}</strong><small>표본 ${fmtInt(c.samples)} · 가격 ${fmtInt(c.pricedSamples)}</small></div><div><small>미국 정규장</small><strong>${c.regularSession?'OPEN':'CLOSED'}</strong><small>최근 성공 ${shortTime(c.lastSuccessAt)}</small></div><div><small>Research Collector</small><strong>${s.running?'RUNNING':'STOPPED'}</strong><small>${s.phase||'idle'} · 최근 ${shortTime(s.lastSuccessAt)}</small></div><div><small>Watchlist</small><strong>${(c.watchlist||[]).length}종목</strong><small>${(c.watchlist||[]).slice(0,4).join(', ')}${(c.watchlist||[]).length>4?'…':''}</small></div><div><small>1분봉 누적쓰기</small><strong>${fmtInt(s.bars1mWritten)}건</strong><small>연구 DB</small></div><div><small>5분봉 / Snapshot</small><strong>${fmtInt(s.bars5mWritten)} / ${fmtInt(s.snapshotsWritten)}</strong><small>Stocks-in-Play 연구</small></div></div><div class="native-us-off"><b>US 매매 상태: PAPER OFF · REAL ORDER OFF</b><br>현재 미국 주식은 데이터와 연구 표본만 축적합니다. 따라서 미국 Paper 매매 내역이나 실거래 기록이 없는 것이 정상입니다. KR 매매 장부와도 분리되어 있습니다.</div><div class="native-us-latest">${latest.length?latest.map(x=>`<div class="native-us-row"><span><b>${x.ticker||'-'}</b> · ${x.session_date||''}</span><span>Score ${num(x.stocks_in_play_score).toFixed(1)}</span></div>`).join(''):'<div class="native-us-row"><span>최근 연구 Snapshot</span><span>표본 대기</span></div>'}</div>${c.lastError?`<div class="down" style="margin-top:8px">시세 수집 최근 오류: ${String(c.lastError)}</div>`:''}${s.lastError?`<div class="down" style="margin-top:6px">연구 수집 최근 오류: ${String(s.lastError)}</div>`:''}`}catch(e){panel.innerHTML=`<b>미국 데이터·연구 상태</b><div class="down" style="margin-top:7px">확인 실패: ${e?.message||e}</div>`}}
-  function apply(){ensurePaperPolicy();ensureUsPanel()}function start(){apply();refreshPaperPolicy();if(document.body.dataset.market==='us')refreshUs();const obs=new MutationObserver(()=>{apply();if(document.body.dataset.market==='us')setTimeout(refreshUs,120)});obs.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['data-market','data-mobile-tab']});document.addEventListener('click',e=>{if(e.target?.closest?.('.market-switch button[data-market="us"]'))setTimeout(refreshUs,250);if(e.target?.closest?.('#usRefresh'))setTimeout(refreshUs,250)},true);setInterval(refreshPaperPolicy,30000);setInterval(()=>{if(document.body.dataset.market==='us')refreshUs()},30000)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
+  if(window.__stockTraderNativeOpsUsVisibility)return;
+  window.__stockTraderNativeOpsUsVisibility=true;
+
+  if(!document.querySelector('#nativeOpsUsVisibility')){
+    const style=document.createElement('style');
+    style.id='nativeOpsUsVisibility';
+    style.textContent=`html.native-client.native-compact body[data-mobile-tab="home"] .main-grid aside .riskbox{display:grid!important;margin-top:10px}html.native-client #nativePaperPolicy{margin-top:9px;font-size:10px;line-height:1.55}html.native-client #nativePaperPolicy strong{font-size:11px}html.native-client #nativeUsResearchPanel{margin-top:10px}html.native-client .native-us-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px}html.native-client .native-us-grid>div{background:rgba(18,36,58,.65);border:1px solid var(--line);border-radius:10px;padding:9px;min-width:0}html.native-client .native-us-grid small{display:block;color:var(--muted);font-size:9px}html.native-client .native-us-grid strong{display:block;margin-top:3px;font-size:13px;overflow:hidden;text-overflow:ellipsis}html.native-client .native-us-off{margin-top:9px;padding:9px;border:1px solid rgba(245,158,11,.35);border-radius:10px;background:rgba(120,74,10,.12);font-size:10px;line-height:1.55}html.native-client .native-us-latest{display:grid;gap:5px;margin-top:8px}html.native-client .native-us-row{display:flex;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid rgba(148,163,184,.15);border-radius:8px;font-size:10px}`;
+    document.head.appendChild(style);
+  }
+
+  const num=v=>Number.isFinite(Number(v))?Number(v):0;
+  const fmtInt=v=>Math.round(num(v)).toLocaleString();
+  const shortTime=v=>{if(!v)return'-';try{return new Date(v).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})}catch{return String(v)}};
+  const setText=(el,text)=>{if(el&&el.textContent!==text)el.textContent=text};
+  let paperBusy=false;
+  let usBusy=false;
+
+  async function json(url){
+    const r=await fetch(url,{cache:'no-store'});
+    let d={};
+    try{d=await r.json()}catch{}
+    if(!r.ok)throw new Error(d?.error||d?.detail||`HTTP ${r.status}`);
+    return d;
+  }
+
+  function ensurePaperPolicy(){
+    const aside=document.querySelector('.main-grid aside');
+    const risk=aside?.querySelector('.riskbox');
+    if(!aside||!risk)return null;
+    let box=aside.querySelector('#nativePaperPolicy');
+    if(!box){
+      box=document.createElement('div');
+      box.id='nativePaperPolicy';
+      box.className='backtest-box';
+      box.textContent='서버 Paper 통제 규칙 확인 중...';
+      risk.insertAdjacentElement('afterend',box);
+    }
+    const title=aside.querySelector('.panel-head h2');
+    setText(title,'자동매매 제어 · SERVER PAPER');
+    const toggle=aside.querySelector('.toggle-row');
+    const hint='표시 전용입니다. 자동매매는 공기계 서버 Paper 루프가 통제합니다.';
+    if(toggle&&toggle.title!==hint)toggle.title=hint;
+    return box;
+  }
+
+  async function refreshPaperPolicy(force=false){
+    if(paperBusy||(!force&&document.hidden))return;
+    const box=ensurePaperPolicy();
+    if(!box)return;
+    paperBusy=true;
+    try{
+      const d=await json(`/api/mobile/status?native_policy=${Date.now()}`);
+      const daily=d?.daily||{},loop=d?.paperLoop||{},risk=d?.risk||{};
+      const riskTrade=document.querySelector('#riskTradeText')?.textContent||'0.35%';
+      const exit=document.querySelector('#exitText')?.textContent||'-1.0% 손절 · +1.5% Trail 시작 · 0.8% Trail';
+      const maxPos=risk.maxOpenPositions||document.querySelector('#maxPositionsText')?.textContent||'2';
+      const lossLimit=Math.abs(num(daily.lossLimit));
+      box.innerHTML=`<strong>${loop.running?'자동 Paper 루프 RUNNING':'자동 Paper 루프 CHECK'} · 앱 스위치 조작 불가 · REAL ORDER OFF</strong><br>진입 ${d.entryStart||'09:30'}~${d.entryCutoff||'14:50'} · EOD ${d.eodExit||'15:15'} · 1회 리스크 ${riskTrade} · 동시 ${maxPos}<br>${exit} · 2연속 손실 Lock · 일손실 ${lossLimit?`₩${fmtInt(lossLimit)}`:'0.75%'} Lock · 일 최대 ${daily.maxDailyTrades||8}건`;
+    }catch(e){
+      box.textContent=`서버 Paper 통제 상태 확인 실패: ${e?.message||e}`;
+    }finally{
+      paperBusy=false;
+    }
+  }
+
+  function ensureUsPanel(){
+    const host=document.querySelector('.us-dashboard');
+    if(!host)return null;
+    let panel=host.querySelector('#nativeUsResearchPanel');
+    if(!panel){
+      panel=document.createElement('div');
+      panel.id='nativeUsResearchPanel';
+      panel.className='backtest-box';
+      panel.innerHTML='<b>미국 데이터·연구 상태</b><div class="native-us-grid"><div>확인 중...</div></div>';
+      host.appendChild(panel);
+    }
+    setText(host.querySelector('.panel-head h2'),'🇺🇸 US 데이터·연구');
+    setText(host.querySelector('.panel-head p'),'NH PLUG 해외주식 · 데이터/연구 수집 · Paper/실주문 OFF');
+    return panel;
+  }
+
+  async function refreshUs(force=false){
+    if(usBusy||(!force&&document.hidden))return;
+    const panel=ensureUsPanel();
+    if(!panel)return;
+    usBusy=true;
+    try{
+      const [u,r]=await Promise.all([
+        json(`/api/us/status?native_us=${Date.now()}`),
+        json(`/api/us/research/status?native_us=${Date.now()}`),
+      ]);
+      const c=u?.collector||{},s=r?.status||{},latest=Array.isArray(r?.latest)?r.latest.slice(0,5):[];
+      panel.innerHTML=`<b>미국 데이터·연구 상태</b><div class="native-us-grid"><div><small>현재가 Collector</small><strong>${c.running?'RUNNING':'STOPPED'}</strong><small>표본 ${fmtInt(c.samples)} · 가격 ${fmtInt(c.pricedSamples)}</small></div><div><small>미국 정규장</small><strong>${c.regularSession?'OPEN':'CLOSED'}</strong><small>최근 성공 ${shortTime(c.lastSuccessAt)}</small></div><div><small>Research Collector</small><strong>${s.running?'RUNNING':'STOPPED'}</strong><small>${s.phase||'idle'} · 최근 ${shortTime(s.lastSuccessAt)}</small></div><div><small>Watchlist</small><strong>${(c.watchlist||[]).length}종목</strong><small>${(c.watchlist||[]).slice(0,4).join(', ')}${(c.watchlist||[]).length>4?'…':''}</small></div><div><small>1분봉 누적쓰기</small><strong>${fmtInt(s.bars1mWritten)}건</strong><small>연구 DB</small></div><div><small>5분봉 / Snapshot</small><strong>${fmtInt(s.bars5mWritten)} / ${fmtInt(s.snapshotsWritten)}</strong><small>Stocks-in-Play 연구</small></div></div><div class="native-us-off"><b>US 매매 상태: PAPER OFF · REAL ORDER OFF</b><br>현재 미국 주식은 데이터와 연구 표본만 축적합니다. 따라서 미국 Paper 매매 내역이나 실거래 기록이 없는 것이 정상입니다. KR 매매 장부와도 분리되어 있습니다.</div><div class="native-us-latest">${latest.length?latest.map(x=>`<div class="native-us-row"><span><b>${x.ticker||'-'}</b> · ${x.session_date||''}</span><span>Score ${num(x.stocks_in_play_score).toFixed(1)}</span></div>`).join(''):'<div class="native-us-row"><span>최근 연구 Snapshot</span><span>표본 대기</span></div>'}</div>${c.lastError?`<div class="down" style="margin-top:8px">시세 수집 최근 오류: ${String(c.lastError)}</div>`:''}${s.lastError?`<div class="down" style="margin-top:6px">연구 수집 최근 오류: ${String(s.lastError)}</div>`:''}`;
+    }catch(e){
+      panel.innerHTML=`<b>미국 데이터·연구 상태</b><div class="down" style="margin-top:7px">확인 실패: ${e?.message||e}</div>`;
+    }finally{
+      usBusy=false;
+    }
+  }
+
+  function apply(){
+    return {paper:!!ensurePaperPolicy(),us:!!ensureUsPanel()};
+  }
+
+  function start(){
+    let attempts=0;
+    let installTimer=null;
+    const installTick=()=>{
+      const ready=apply();
+      attempts++;
+      if((ready.paper&&ready.us)||attempts>=24){
+        if(installTimer)clearInterval(installTimer);
+        installTimer=null;
+      }
+    };
+    installTick();
+    if(attempts<24)installTimer=setInterval(installTick,500);
+
+    refreshPaperPolicy(true);
+    if(document.body?.dataset.market==='us')refreshUs(true);
+
+    let attrObserver=null;
+    if(document.body){
+      attrObserver=new MutationObserver(mutations=>{
+        for(const m of mutations){
+          if(m.type!=='attributes')continue;
+          if(m.attributeName==='data-market'&&document.body.dataset.market==='us'){
+            ensureUsPanel();
+            refreshUs(true);
+          }
+          if(m.attributeName==='data-mobile-tab'&&document.body.dataset.mobileTab==='home'){
+            ensurePaperPolicy();
+            refreshPaperPolicy(true);
+          }
+        }
+      });
+      // Deliberately attributes-only. A subtree/childList observer here can observe
+      // this module's own text/innerHTML writes and create a WebView re-render loop.
+      attrObserver.observe(document.body,{attributes:true,attributeFilter:['data-market','data-mobile-tab']});
+    }
+
+    const onClick=e=>{
+      if(e.target?.closest?.('.market-switch button[data-market="us"]'))setTimeout(()=>refreshUs(true),220);
+      if(e.target?.closest?.('#usRefresh'))setTimeout(()=>refreshUs(true),220);
+    };
+    document.addEventListener('click',onClick,true);
+
+    const paperTimer=setInterval(()=>{
+      if(document.body?.dataset.mobileTab==='home')refreshPaperPolicy();
+    },30000);
+    const usTimer=setInterval(()=>{
+      if(document.body?.dataset.market==='us')refreshUs();
+    },30000);
+
+    const onVisibility=()=>{
+      if(document.hidden)return;
+      if(document.body?.dataset.mobileTab==='home')refreshPaperPolicy(true);
+      if(document.body?.dataset.market==='us')refreshUs(true);
+    };
+    document.addEventListener('visibilitychange',onVisibility);
+
+    window.addEventListener('pagehide',()=>{
+      if(installTimer)clearInterval(installTimer);
+      clearInterval(paperTimer);
+      clearInterval(usTimer);
+      attrObserver?.disconnect();
+      document.removeEventListener('click',onClick,true);
+      document.removeEventListener('visibilitychange',onVisibility);
+    },{once:true});
+  }
+
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
