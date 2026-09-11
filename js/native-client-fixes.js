@@ -1,6 +1,6 @@
-// Native Android client usability fixes: keep content above the fixed mobile nav
-// and provide an explicit server-update control. The update action only calls the
-// existing guarded Android updater; it never touches broker/order endpoints.
+// Native Android client usability + read-only Shadow research visibility.
+// The update action calls only the existing guarded Android updater; the Shadow
+// monitor uses GET-only research endpoints and never touches broker/order APIs.
 (()=>{
   const qs=new URLSearchParams(location.search);
   if(qs.get('native')!=='1')return;
@@ -16,12 +16,27 @@
     html.native-client .native-shadow-actions{display:flex;gap:6px;align-items:center;margin-left:auto}
     html.native-client #nativeServerUpdateBtn{min-width:72px;white-space:nowrap}
     html.native-client #nativeServerUpdateStatus{margin-top:8px;font-size:11px;line-height:1.45}
+    html.native-client #nativeShadowDeep{margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,.18)}
+    html.native-client .native-shadow-deep-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+    html.native-client .native-shadow-deep-head strong{font-size:13px}
+    html.native-client .native-shadow-deep-head small{font-size:10px;opacity:.68}
+    html.native-client .native-shadow-deep-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+    html.native-client .native-shadow-deep-card{background:#0c1423;border:1px solid rgba(148,163,184,.18);border-radius:9px;padding:8px;min-width:0}
+    html.native-client .native-shadow-deep-card small{display:block;font-size:9px;opacity:.68}
+    html.native-client .native-shadow-deep-card strong{display:block;margin-top:3px;font-size:14px;overflow:hidden;text-overflow:ellipsis}
+    html.native-client .native-shadow-metric-note{margin-top:8px;font-size:10px;line-height:1.45;opacity:.72}
+    html.native-client .native-shadow-recent{display:grid;gap:5px;margin-top:8px}
+    html.native-client .native-shadow-recent-row{display:flex;justify-content:space-between;gap:8px;padding:7px 8px;border-radius:8px;background:#0c1423;border:1px solid rgba(148,163,184,.14);font-size:10px}
+    html.native-client .native-shadow-recent-row b{font-size:11px}
     html.native-client main.wrap>section:last-child{margin-bottom:24px!important}
   `;
   document.head.appendChild(style);
 
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const msgOf=(j,fallback='오류')=>j?.error||j?.detail||j?.message||fallback;
+  const n=v=>Number.isFinite(Number(v))?Number(v):0;
+  const pf=v=>n(v)>=999?'∞':n(v).toFixed(2);
+  const pct=(v,d=2)=>`${n(v)>=0?'+':''}${n(v).toFixed(d)}%`;
 
   async function getJson(url,opts={}){
     const r=await fetch(url,{cache:'no-store',...opts});
@@ -107,6 +122,67 @@
     btn.textContent='서버 업데이트';
   }
 
+  function deepCard(label,value,detail=''){
+    return `<div class="native-shadow-deep-card"><small>${label}</small><strong>${value}</strong>${detail?`<small style="margin-top:3px">${detail}</small>`:''}</div>`;
+  }
+
+  function flags(row){
+    const out=[];
+    if(n(row?.daily_lock_continuation))out.push('Lock 이후');
+    if(n(row?.reentry_after_shadow_loss))out.push('손실후 재진입');
+    if(n(row?.prior_control_loss))out.push('Control손실후');
+    return out.join(' · ')||'일반 Shadow';
+  }
+
+  async function refreshDeepShadow(){
+    const box=document.querySelector('#nativeShadowDeep');
+    if(!box)return;
+    const status=box.querySelector('#nativeShadowDeepState');
+    try{
+      const d=await getJson(`/api/research/shadow-continuation?limit=8&t=${Date.now()}`);
+      const all=d?.allClosed||{};
+      const today=d?.todayClosed||{};
+      const re=d?.sameStockReentryAfterLoss||{};
+      const lock=d?.dailyLockContinuation||{};
+      const ctrl=d?.afterActualControlLoss||{};
+      const study=d?.policyStudy||{};
+      const open=n(d?.openPositions);
+      const total=n(all.trades)+open;
+      const target=n(study.minimumReentryLossSample)||50;
+      const cur=n(study.currentReentryLossSample);
+      if(status){
+        status.textContent='연구 장부 연결됨 · 실제 주문 0';
+        status.style.color='#5ee0a3';
+      }
+      const grid=box.querySelector('#nativeShadowDeepGrid');
+      if(grid)grid.innerHTML=[
+        deepCard('누적 Shadow 표본',`${total}건`,`종료 ${n(all.trades)} · OPEN ${open}`),
+        deepCard('오늘 종료 표본',`${n(today.trades)}건`,`승률 ${n(today.winRate).toFixed(1)}%`),
+        deepCard('Daily Lock 이후',`${n(lock.trades)}건`,`PF ${pf(lock.profitFactor)} · 기대 ${pct(lock.expectancyPct,3)}`),
+        deepCard('손실 후 동일종목 재진입',`${cur} / ${target}`,study.readyForControlReview?'Control 검토 표본 도달':'아직 연구 수집 중'),
+        deepCard('재진입 성과',`승률 ${n(re.winRate).toFixed(1)}%`,`PF ${pf(re.profitFactor)} · 기대 ${pct(re.expectancyPct,3)}`),
+        deepCard('실제 Control 손실 이후',`${n(ctrl.trades)}건`,`승률 ${n(ctrl.winRate).toFixed(1)}% · PF ${pf(ctrl.profitFactor)}`),
+      ].join('');
+      const stats=box.querySelector('#nativeShadowDeepStats');
+      if(stats)stats.textContent=`전체 종료 ${n(all.trades)}건 · 승률 ${n(all.winRate).toFixed(1)}% · PF ${pf(all.profitFactor)} · 기대값 ${pct(all.expectancyPct,3)} · 누적 정규화 ${pct(all.netNormalizedPct,2)}`;
+      const recent=box.querySelector('#nativeShadowRecentTrades');
+      if(recent){
+        const rows=Array.isArray(d?.recent)?d.recent.slice(0,5):[];
+        recent.innerHTML=rows.length?rows.map(r=>{
+          const pnl=r?.pnl_pct==null?'OPEN':pct(r.pnl_pct,2);
+          const name=String(r?.name||r?.code||'-');
+          const state=String(r?.status||'-');
+          return `<div class="native-shadow-recent-row"><div><b>${name}</b><br><span>${flags(r)}</span></div><div style="text-align:right"><b>${pnl}</b><br><span>${state}</span></div></div>`;
+        }).join(''):'<div class="native-shadow-metric-note">아직 누적된 Shadow 거래가 없습니다.</div>';
+      }
+    }catch(err){
+      if(status){
+        status.textContent=`연구 장부 확인 실패: ${err?.message||err}`;
+        status.style.color='#ff9a9a';
+      }
+    }
+  }
+
   function installControls(){
     const panel=document.querySelector('#nativeShadowPanel');
     const detail=document.querySelector('#nativeUiModeBtn');
@@ -135,15 +211,36 @@
       const status=document.createElement('div');
       status.id='nativeServerUpdateStatus';
       status.className='backtest-box';
-      status.textContent='업데이트 버튼은 공기계 서버만 갱신합니다. APK 자체 업데이트는 별도 설치가 필요합니다.';
+      status.textContent='업데이트 버튼은 공기계 서버와 서버형 UI를 갱신합니다. 네이티브 셸 자체가 바뀔 때만 새 APK가 필요합니다.';
       head.insertAdjacentElement('afterend',status);
+    }
+
+    if(!document.querySelector('#nativeShadowDeep')){
+      const deep=document.createElement('div');
+      deep.id='nativeShadowDeep';
+      deep.innerHTML=`
+        <div class="native-shadow-deep-head"><strong>Shadow 누적 연구</strong><small id="nativeShadowDeepState">연구 장부 확인 중...</small></div>
+        <div id="nativeShadowDeepGrid" class="native-shadow-deep-grid"></div>
+        <div id="nativeShadowDeepStats" class="native-shadow-metric-note">누적 성과 계산 중...</div>
+        <div id="nativeShadowRecentTrades" class="native-shadow-recent"></div>
+        <div class="native-shadow-metric-note">연구용 정규화 수익률입니다. 실계좌 수익이 아니며 Control v0.8.0 규칙은 자동 변경되지 않습니다.</div>`;
+      const list=panel.querySelector('#nativeShadowList');
+      if(list)list.insertAdjacentElement('beforebegin',deep);else panel.appendChild(deep);
     }
     return true;
   }
 
+  let shadowTimer=null;
+  function bootNativeEnhancements(){
+    if(!installControls())return false;
+    refreshDeepShadow();
+    if(!shadowTimer)shadowTimer=setInterval(refreshDeepShadow,30000);
+    return true;
+  }
+
   function start(){
-    if(installControls())return;
-    const obs=new MutationObserver(()=>{if(installControls())obs.disconnect()});
+    if(bootNativeEnhancements())return;
+    const obs=new MutationObserver(()=>{if(bootNativeEnhancements())obs.disconnect()});
     obs.observe(document.documentElement,{subtree:true,childList:true});
     setTimeout(()=>obs.disconnect(),20000);
   }
