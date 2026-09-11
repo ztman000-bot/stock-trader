@@ -14,6 +14,7 @@ import unified_app as base
 from collector import KST
 from db_backup import snapshot as db_snapshot, status as db_backup_status
 from network_access import is_trusted_client_host
+from shadow_continuation import report as shadow_continuation_report
 
 app = base.app
 BASE_DIR = Path(__file__).resolve().parent
@@ -327,6 +328,21 @@ def android_liveness(request):
     })
 
 
+def android_shadow_continuation(request):
+    """Read-only research report for the installed Android dashboard."""
+    try:
+        limit = max(1, min(int(request.query_params.get('limit', '12')), 50))
+        return JSONResponse(shadow_continuation_report(limit=limit))
+    except Exception as exc:
+        return JSONResponse({
+            'ok': False,
+            'researchOnly': True,
+            'controlStrategy': 'v0.8.0 LOCKED',
+            'realOrderEnabled': False,
+            'error': f'{type(exc).__name__}: {exc}'[:500],
+        }, 500)
+
+
 def android_watchdog_status(request):
     now = time.time()
     wd_pid = _read_pid(WATCHDOG_PIDFILE)
@@ -375,4 +391,5 @@ app.router.routes.extend([
     Route('/api/system/update', android_update_request, methods=['POST']),
     Route('/api/system/update/run', android_update_request, methods=['POST']),
     Route('/api/system/android-watchdog', android_watchdog_status),
+    Route('/api/research/shadow-continuation', android_shadow_continuation),
 ])
