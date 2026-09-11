@@ -25,14 +25,15 @@ class NativeAssetCacheRefreshTests(unittest.TestCase):
         self.assertIn("url.pathname.startsWith('/api/')",sw)
         self.assertIn("fetch(event.request,{cache:'no-store'})",sw)
 
-    def test_native_usability_fix_is_cache_busted_after_update_button_hotfix(self):
+    def test_native_usability_fix_is_cache_busted_after_visibility_update(self):
         app=text('js/app-safe.js')
         index=text('index.html')
-        self.assertIn("const ASSET_VERSION='1789141200'",app)
-        self.assertIn("import('./native-client-fixes.js?v=1789141200')",app)
-        self.assertIn("import('./native-update-button-hotfix.js?v=1789141200')",app)
+        self.assertIn("const ASSET_VERSION='1789143000'",app)
+        self.assertIn("import('./native-client-fixes.js?v=1789143000')",app)
+        self.assertIn("import('./native-update-button-hotfix.js?v=1789143000')",app)
+        self.assertIn("import('./native-ops-us-visibility.js?v=1789143000')",app)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'",app)
-        self.assertIn('/js/app-safe.js?v=1789141200',index)
+        self.assertIn('/js/app-safe.js?v=1789143000',index)
 
 
 if __name__=='__main__':
