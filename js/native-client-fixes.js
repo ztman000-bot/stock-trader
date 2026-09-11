@@ -4,39 +4,44 @@
 (()=>{
   const qs=new URLSearchParams(location.search);
   if(qs.get('native')!=='1')return;
+  if(window.__stockTraderNativeClientFixes)return;
+  window.__stockTraderNativeClientFixes=true;
 
-  const style=document.createElement('style');
-  style.id='nativeClientUsabilityFixes';
-  style.textContent=`
-    html.native-client,html.native-client body{min-height:100%;overflow-y:auto!important;-webkit-overflow-scrolling:touch}
-    html.native-client body{padding-bottom:calc(126px + env(safe-area-inset-bottom))!important}
-    html.native-client main.wrap{padding-bottom:calc(138px + env(safe-area-inset-bottom))!important}
-    html.native-client .mobile-nav{padding-bottom:calc(8px + env(safe-area-inset-bottom))!important}
-    html.native-client #nativeShadowPanel .panel-head{flex-wrap:wrap;align-items:center}
-    html.native-client .native-shadow-actions{display:flex;gap:6px;align-items:center;margin-left:auto}
-    html.native-client #nativeServerUpdateBtn{min-width:72px;white-space:nowrap}
-    html.native-client #nativeServerUpdateStatus{margin-top:8px;font-size:11px;line-height:1.45}
-    html.native-client #nativeShadowDeep{margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,.18)}
-    html.native-client .native-shadow-deep-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-    html.native-client .native-shadow-deep-head strong{font-size:13px}
-    html.native-client .native-shadow-deep-head small{font-size:10px;opacity:.68}
-    html.native-client .native-shadow-deep-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
-    html.native-client .native-shadow-deep-card{background:#0c1423;border:1px solid rgba(148,163,184,.18);border-radius:9px;padding:8px;min-width:0}
-    html.native-client .native-shadow-deep-card small{display:block;font-size:9px;opacity:.68}
-    html.native-client .native-shadow-deep-card strong{display:block;margin-top:3px;font-size:14px;overflow:hidden;text-overflow:ellipsis}
-    html.native-client .native-shadow-metric-note{margin-top:8px;font-size:10px;line-height:1.45;opacity:.72}
-    html.native-client .native-shadow-recent{display:grid;gap:5px;margin-top:8px}
-    html.native-client .native-shadow-recent-row{display:flex;justify-content:space-between;gap:8px;padding:7px 8px;border-radius:8px;background:#0c1423;border:1px solid rgba(148,163,184,.14);font-size:10px}
-    html.native-client .native-shadow-recent-row b{font-size:11px}
-    html.native-client main.wrap>section:last-child{margin-bottom:24px!important}
-  `;
-  document.head.appendChild(style);
+  if(!document.querySelector('#nativeClientUsabilityFixes')){
+    const style=document.createElement('style');
+    style.id='nativeClientUsabilityFixes';
+    style.textContent=`
+      html.native-client,html.native-client body{min-height:100%;overflow-y:auto!important;-webkit-overflow-scrolling:touch}
+      html.native-client body{padding-bottom:calc(126px + env(safe-area-inset-bottom))!important}
+      html.native-client main.wrap{padding-bottom:calc(138px + env(safe-area-inset-bottom))!important}
+      html.native-client .mobile-nav{padding-bottom:calc(8px + env(safe-area-inset-bottom))!important}
+      html.native-client #nativeShadowPanel .panel-head{flex-wrap:wrap;align-items:center}
+      html.native-client .native-shadow-actions{display:flex;gap:6px;align-items:center;margin-left:auto}
+      html.native-client #nativeServerUpdateBtn{min-width:72px;white-space:nowrap}
+      html.native-client #nativeServerUpdateStatus{margin-top:8px;font-size:11px;line-height:1.45}
+      html.native-client #nativeShadowDeep{margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,.18)}
+      html.native-client .native-shadow-deep-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+      html.native-client .native-shadow-deep-head strong{font-size:13px}
+      html.native-client .native-shadow-deep-head small{font-size:10px;opacity:.68}
+      html.native-client .native-shadow-deep-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+      html.native-client .native-shadow-deep-card{background:#0c1423;border:1px solid rgba(148,163,184,.18);border-radius:9px;padding:8px;min-width:0}
+      html.native-client .native-shadow-deep-card small{display:block;font-size:9px;opacity:.68}
+      html.native-client .native-shadow-deep-card strong{display:block;margin-top:3px;font-size:14px;overflow:hidden;text-overflow:ellipsis}
+      html.native-client .native-shadow-metric-note{margin-top:8px;font-size:10px;line-height:1.45;opacity:.72}
+      html.native-client .native-shadow-recent{display:grid;gap:5px;margin-top:8px}
+      html.native-client .native-shadow-recent-row{display:flex;justify-content:space-between;gap:8px;padding:7px 8px;border-radius:8px;background:#0c1423;border:1px solid rgba(148,163,184,.14);font-size:10px}
+      html.native-client .native-shadow-recent-row b{font-size:11px}
+      html.native-client main.wrap>section:last-child{margin-bottom:24px!important}
+    `;
+    document.head.appendChild(style);
+  }
 
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const msgOf=(j,fallback='오류')=>j?.error||j?.detail||j?.message||fallback;
   const n=v=>Number.isFinite(Number(v))?Number(v):0;
   const pf=v=>n(v)>=999?'∞':n(v).toFixed(2);
   const pct=(v,d=2)=>`${n(v)>=0?'+':''}${n(v).toFixed(d)}%`;
+  let deepShadowBusy=false;
 
   async function getJson(url,opts={}){
     const r=await fetch(url,{cache:'no-store',...opts});
@@ -134,9 +139,12 @@
     return out.join(' · ')||'일반 Shadow';
   }
 
-  async function refreshDeepShadow(){
+  async function refreshDeepShadow(force=false){
+    const tab=document.body?.dataset.mobileTab;
+    if(deepShadowBusy||document.hidden||(!force&&tab&&tab!=='learn'))return;
     const box=document.querySelector('#nativeShadowDeep');
     if(!box)return;
+    deepShadowBusy=true;
     const status=box.querySelector('#nativeShadowDeepState');
     try{
       const d=await getJson(`/api/research/shadow-continuation?limit=8&t=${Date.now()}`);
@@ -180,6 +188,8 @@
         status.textContent=`연구 장부 확인 실패: ${err?.message||err}`;
         status.style.color='#ff9a9a';
       }
+    }finally{
+      deepShadowBusy=false;
     }
   }
 
@@ -233,16 +243,35 @@
   let shadowTimer=null;
   function bootNativeEnhancements(){
     if(!installControls())return false;
-    refreshDeepShadow();
+    if(document.body?.dataset.mobileTab==='learn')refreshDeepShadow(true);
     if(!shadowTimer)shadowTimer=setInterval(refreshDeepShadow,30000);
     return true;
   }
 
   function start(){
-    if(bootNativeEnhancements())return;
-    const obs=new MutationObserver(()=>{if(bootNativeEnhancements())obs.disconnect()});
-    obs.observe(document.documentElement,{subtree:true,childList:true});
-    setTimeout(()=>obs.disconnect(),20000);
+    if(!bootNativeEnhancements()){
+      let attempts=0;
+      let installTimer=setInterval(()=>{
+        attempts++;
+        if(bootNativeEnhancements()||attempts>=30){
+          clearInterval(installTimer);
+          installTimer=null;
+        }
+      },350);
+      window.addEventListener('pagehide',()=>{if(installTimer)clearInterval(installTimer)},{once:true});
+    }
+
+    const onClick=e=>{
+      if(e.target?.closest?.('.mobile-nav button[data-tab="learn"],#nativeResearchTabBtn'))setTimeout(()=>refreshDeepShadow(true),180);
+    };
+    document.addEventListener('click',onClick,true);
+    const onVisibility=()=>{if(!document.hidden&&document.body?.dataset.mobileTab==='learn')refreshDeepShadow(true)};
+    document.addEventListener('visibilitychange',onVisibility);
+    window.addEventListener('pagehide',()=>{
+      if(shadowTimer)clearInterval(shadowTimer);
+      document.removeEventListener('click',onClick,true);
+      document.removeEventListener('visibilitychange',onVisibility);
+    },{once:true});
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
