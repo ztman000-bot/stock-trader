@@ -15,8 +15,6 @@
     html.native-compact footer{display:none!important}
     html.native-compact .topbar .sub{display:none!important}
     html.native-compact .topbar{padding-top:8px!important;padding-bottom:8px!important}
-    html.native-compact #dataHealthGrid,
-    html.native-compact #dataHealthNote{display:none!important}
     html.native-compact .main-grid aside .riskbox,
     html.native-compact .main-grid aside #killBtn,
     html.native-compact .main-grid aside #resetBtn{display:none!important}
@@ -30,10 +28,50 @@
     html.native-client .native-detail-note{margin-top:8px;font-size:12px;opacity:.72;line-height:1.5}
     html.native-client #nativeUiModeBtn{min-width:74px}
     html.native-client #nativeShadowRecent[hidden]{display:none!important}
+
+    /* Information architecture v2: each bottom tab has one job. */
+    body[data-mobile-tab="home"] #nativeShadowPanel,
+    body[data-mobile-tab="home"] #dataHealthPanel{display:block!important}
+    body[data-mobile-tab="home"] #nativeShadowGrid,
+    body[data-mobile-tab="home"] #nativeShadowList,
+    body[data-mobile-tab="home"] #nativeShadowDeep,
+    body[data-mobile-tab="home"] #nativeShadowPanel .native-detail-note,
+    body[data-mobile-tab="home"] #dataHealthGrid,
+    body[data-mobile-tab="home"] #dataHealthNote{display:none!important}
+    body[data-mobile-tab="home"] #nativeResearchTabBtn{display:inline-flex!important}
+
+    body[data-mobile-tab="top"] #nativeShadowPanel,
+    body[data-mobile-tab="top"] #dataHealthPanel{display:none!important}
+
+    body[data-mobile-tab="chart"] #nativeShadowPanel,
+    body[data-mobile-tab="chart"] #dataHealthPanel{display:none!important}
+    body[data-mobile-tab="chart"] .native-trade-grid{display:grid!important}
+    body[data-mobile-tab="chart"] .native-trade-grid>[data-native-role="research"]{display:none!important}
+    body[data-mobile-tab="chart"] .native-paper-history{display:block!important}
+
+    body[data-mobile-tab="learn"] #nativeShadowPanel,
+    body[data-mobile-tab="learn"] #dataHealthPanel{display:block!important}
+    html.native-compact body[data-mobile-tab="learn"] #dataHealthGrid{display:grid!important}
+    html.native-compact body[data-mobile-tab="learn"] #dataHealthNote{display:block!important}
+    body[data-mobile-tab="learn"] #nativeShadowGrid{display:grid!important}
+    body[data-mobile-tab="learn"] #nativeShadowList{display:grid!important}
+    body[data-mobile-tab="learn"] #nativeShadowDeep{display:block!important}
+    body[data-mobile-tab="learn"] #nativeShadowPanel .native-detail-note{display:block!important}
+    body[data-mobile-tab="learn"] .native-trade-grid>[data-native-role="trade"]{display:none!important}
+    body[data-mobile-tab="learn"] .native-paper-history{display:none!important}
+    body[data-mobile-tab="learn"] #nativeResearchTabBtn{display:none!important}
+
+    /* Old global 상세 보기 is replaced by clear tab roles. */
+    #nativeUiModeBtn{display:none!important}
+    body[data-mobile-tab="home"] #nativeShadowPanel .panel-head,
+    body[data-mobile-tab="home"] #dataHealthPanel .panel-head{margin-bottom:7px}
+    body[data-mobile-tab="home"] #nativeShadowSummary,
+    body[data-mobile-tab="home"] #dataHealthSummary{font-size:11px;line-height:1.45}
+    #nativeResearchTabBtn{white-space:nowrap}
   `;
   document.head.appendChild(style);
 
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
   const num=(v,d=1)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'-';
   const won=v=>Number.isFinite(Number(v))?`${Number(v)>=0?'+':''}₩${Math.round(Number(v)).toLocaleString()}`:'-';
 
@@ -42,6 +80,13 @@
     const b=document.querySelector('#nativeUiModeBtn');
     if(b)b.textContent=on?'간편 보기':'상세 보기';
     try{localStorage.setItem('stock-trader-native-detail',on?'1':'0')}catch{}
+  }
+
+  function switchTab(tab){
+    document.body.dataset.mobileTab=tab;
+    try{localStorage.setItem('daytrader-mobile-tab',tab)}catch{}
+    document.querySelectorAll('.mobile-nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+    try{scrollTo({top:0,behavior:'instant'})}catch{scrollTo(0,0)}
   }
 
   function ensurePanel(){
@@ -66,6 +111,46 @@
     else main.prepend(panel);
     panel.querySelector('#nativeUiModeBtn')?.addEventListener('click',()=>setDetailed(root.classList.contains('native-compact')));
     return panel;
+  }
+
+  function classifySections(){
+    const positions=document.querySelector('#positionsBody')?.closest('article');
+    const risk=document.querySelector('#riskState')?.closest('article');
+    const grid=positions?.closest('.lower-grid');
+    if(grid)grid.classList.add('native-trade-grid');
+    if(positions)positions.dataset.nativeRole='trade';
+    if(risk)risk.dataset.nativeRole='research';
+    const trades=document.querySelector('#tradesBody')?.closest('section');
+    if(trades)trades.classList.add('native-paper-history');
+  }
+
+  function tuneNavigation(){
+    const learn=document.querySelector('.mobile-nav button[data-tab="learn"]');
+    if(learn&&learn.dataset.iaV2!=='1'){
+      learn.dataset.iaV2='1';
+      const icon=learn.querySelector('b')?.outerHTML||'<b>▣</b>';
+      learn.innerHTML=`${icon}연구·학습`;
+    }
+  }
+
+  function ensureResearchShortcut(){
+    const panel=ensurePanel();
+    if(!panel)return;
+    let actions=panel.querySelector('.native-shadow-actions');
+    if(!actions){
+      actions=document.createElement('div');
+      actions.className='native-shadow-actions';
+      panel.querySelector('.panel-head')?.appendChild(actions);
+    }
+    if(actions&&!document.querySelector('#nativeResearchTabBtn')){
+      const btn=document.createElement('button');
+      btn.id='nativeResearchTabBtn';
+      btn.type='button';
+      btn.className='btn ghost compact';
+      btn.textContent='연구 보기';
+      btn.addEventListener('click',()=>switchTab('learn'));
+      actions.appendChild(btn);
+    }
   }
 
   function lockReason(d){
@@ -129,11 +214,21 @@
     }
   }
 
+  function organize(){
+    root.classList.add('native-compact');
+    try{localStorage.setItem('stock-trader-native-detail','0')}catch{}
+    classifySections();
+    tuneNavigation();
+    ensureResearchShortcut();
+  }
+
   function start(){
     ensurePanel();
-    let detail=false;
-    try{detail=localStorage.getItem('stock-trader-native-detail')==='1'}catch{}
-    setDetailed(detail);
+    setDetailed(false);
+    organize();
+    const obs=new MutationObserver(organize);
+    obs.observe(document.documentElement,{childList:true,subtree:true});
+    setTimeout(()=>obs.disconnect(),25000);
     refreshShadow();
     setInterval(refreshShadow,30000);
   }
