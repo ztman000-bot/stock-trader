@@ -1,5 +1,5 @@
 const ASSET_VERSION='1789005000';
-const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install`;
+const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install-nativefix-1789140400`;
 const CORE_ASSETS=[
   '/classic',
   `/styles.css?v=${ASSET_VERSION}`,
@@ -68,6 +68,18 @@ self.addEventListener('fetch',event=>{
         const shell=await caches.match('/classic');
         if(shell)return shell;
         return new Response('OFFLINE',{status:503,statusText:'Offline'});
+      })
+    );
+    return;
+  }
+
+  // JavaScript controls safety/status UX and must not boot from a stale cache after
+  // a server update. Prefer the network; cache is only an offline fallback.
+  if(url.pathname.endsWith('.js')){
+    event.respondWith(
+      networkRefresh(event.request).catch(async()=>{
+        const cached=await caches.match(event.request);
+        return cached||new Response('OFFLINE',{status:503,statusText:'Offline'});
       })
     );
     return;
