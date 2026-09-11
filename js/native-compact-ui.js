@@ -1,5 +1,5 @@
 // Native Android client compact monitor + Shadow visibility.
-// Read-only UX: only GETs existing local/Tailscale API endpoints and never mutates Paper/Control.
+// Read-only UX: reuses the dashboard status stream and never mutates Paper/Control.
 (()=>{
   const qs=new URLSearchParams(location.search);
   if(qs.get('native')!=='1')return;
@@ -64,7 +64,6 @@
       body[data-mobile-tab="learn"] .native-paper-history{display:none!important}
       body[data-mobile-tab="learn"] #nativeResearchTabBtn{display:none!important}
 
-      /* Old global 상세 보기 is replaced by clear tab roles. */
       #nativeUiModeBtn{display:none!important}
       body[data-mobile-tab="home"] #nativeShadowPanel .panel-head,
       body[data-mobile-tab="home"] #dataHealthPanel .panel-head{margin-bottom:7px}
@@ -92,7 +91,7 @@
     try{localStorage.setItem('daytrader-mobile-tab',tab)}catch{}
     document.querySelectorAll('.mobile-nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
     try{scrollTo({top:0,behavior:'instant'})}catch{scrollTo(0,0)}
-    if(tab==='home'||tab==='learn')setTimeout(()=>refreshShadow(true),120);
+    if(tab==='home'||tab==='learn')setTimeout(()=>refreshShadow(true),80);
   }
 
   function ensurePanel(){
@@ -171,6 +170,40 @@
     return `<div><small>${esc(label)}</small><strong>${esc(value)}</strong>${detail?`<br><small>${esc(detail)}</small>`:''}</div>`;
   }
 
+  function renderShadow(mobile){
+    const panel=ensurePanel();
+    if(!panel||!mobile)return;
+    const rows=Array.isArray(mobile?.scanner)?mobile.scanner:[];
+    const shadow=rows.filter(x=>x?.action==='SHADOW_ONLY');
+    const daily=mobile?.daily||{};
+    const loop=mobile?.paperLoop||{};
+    const locked=Boolean(daily?.locked);
+    const summary=panel.querySelector('#nativeShadowSummary');
+    if(summary){
+      summary.innerHTML=`<b>${locked?'PAPER LOCK → SHADOW 관찰 중':'PAPER GATE 정상'}</b> · ${esc(lockReason(daily))}<br><small>현재 SHADOW_ONLY ${shadow.length}종목 · 실제 주문 0 · 자동 Control 변경 0</small>`;
+    }
+    const grid=panel.querySelector('#nativeShadowGrid');
+    if(grid)grid.innerHTML=[
+      box('현재 Shadow 후보',`${shadow.length}종목`,locked?'BUY 조건 충족 신호를 가상 기록':'현재 Lock 전환 없음'),
+      box('Shadow 신호 기록',`${Number(loop.shadowSignals||0)}건`,'현재 서버 프로세스 누적'),
+      box('연속 손실',`${Number(daily.consecutiveLosses||0)} / 2`,daily.locked?'Lock 판정 반영':'정상'),
+      box('오늘 Paper 손익',won(daily.pnl),`${Number(daily.closedTrades||0)}건 종료`),
+      box('동일종목 재진입 연구','수집 중','손실 후 재진입 성과 비교'),
+      box('Control','v0.8.0 LOCKED','REAL ORDER OFF'),
+    ].join('');
+    const list=panel.querySelector('#nativeShadowList');
+    if(list){
+      if(!shadow.length){
+        list.innerHTML='<div class="backtest-box">현재 SHADOW_ONLY 종목은 없습니다. Daily Lock이 발생한 뒤에도 BUY 조건이 다시 나오면 이곳에 종목·점수·판정 이유가 표시됩니다.</div>';
+      }else{
+        list.innerHTML=shadow.slice(0,5).map(x=>{
+          const why=(x?.blockedReasons||[]).join(' · ')||lockReason(daily);
+          return `<div class="native-shadow-row"><div><strong>${esc(x?.name||x?.code||'-')}</strong> <small>${esc(x?.code||'')}</small><br><small>${esc(why)}</small></div><div class="native-shadow-tag">SHADOW · ${num(x?.score,1)}</div></div>`;
+        }).join('');
+      }
+    }
+  }
+
   async function getJson(url){
     const r=await fetch(url,{cache:'no-store'});
     if(!r.ok)throw new Error(`HTTP ${r.status}`);
@@ -180,43 +213,16 @@
   async function refreshShadow(force=false){
     const tab=document.body?.dataset.mobileTab;
     if(shadowBusy||document.hidden||(!force&&tab&&tab!=='home'&&tab!=='learn'))return;
+    const shared=window.stockClassicFastStart?.latest;
+    if(shared){renderShadow(shared);return}
     const panel=ensurePanel();
     if(!panel)return;
     shadowBusy=true;
     try{
-      const [scan,mobile]=await Promise.all([
-        getJson(`/api/paper/scan?native_shadow=${Date.now()}`),
-        getJson(`/api/mobile/status?native_shadow=${Date.now()}`),
-      ]);
-      const rows=Array.isArray(scan?.rows)?scan.rows:[];
-      const shadow=rows.filter(x=>x?.action==='SHADOW_ONLY');
-      const daily=scan?.daily||mobile?.daily||rows[0]?.daily||{};
-      const loop=mobile?.paperLoop||{};
-      const locked=Boolean(daily?.locked);
-      const summary=panel.querySelector('#nativeShadowSummary');
-      if(summary){
-        summary.innerHTML=`<b>${locked?'PAPER LOCK → SHADOW 관찰 중':'PAPER GATE 정상'}</b> · ${esc(lockReason(daily))}<br><small>현재 SHADOW_ONLY ${shadow.length}종목 · 실제 주문 0 · 자동 Control 변경 0</small>`;
-      }
-      const grid=panel.querySelector('#nativeShadowGrid');
-      if(grid)grid.innerHTML=[
-        box('현재 Shadow 후보',`${shadow.length}종목`,locked?'BUY 조건 충족 신호를 가상 기록':'현재 Lock 전환 없음'),
-        box('Shadow 신호 기록',`${Number(loop.shadowSignals||0)}건`,'현재 서버 프로세스 누적'),
-        box('연속 손실',`${Number(daily.consecutiveLosses||0)} / 2`,daily.locked?'Lock 판정 반영':'정상'),
-        box('오늘 Paper 손익',won(daily.pnl),`${Number(daily.closedTrades||0)}건 종료`),
-        box('동일종목 재진입 연구','수집 중','손실 후 재진입 성과 비교'),
-        box('Control','v0.8.0 LOCKED','REAL ORDER OFF'),
-      ].join('');
-      const list=panel.querySelector('#nativeShadowList');
-      if(list){
-        if(!shadow.length){
-          list.innerHTML='<div class="backtest-box">현재 SHADOW_ONLY 종목은 없습니다. Daily Lock이 발생한 뒤에도 BUY 조건이 다시 나오면 이곳에 종목·점수·판정 이유가 표시됩니다.</div>';
-        }else{
-          list.innerHTML=shadow.slice(0,5).map(x=>{
-            const why=(x?.blockedReasons||[]).join(' · ')||lockReason(daily);
-            return `<div class="native-shadow-row"><div><strong>${esc(x?.name||x?.code||'-')}</strong> <small>${esc(x?.code||'')}</small><br><small>${esc(why)}</small></div><div class="native-shadow-tag">SHADOW · ${num(x?.score,1)}</div></div>`;
-          }).join('');
-        }
-      }
+      // Fallback only. Normally classic-fast-start supplies the same status snapshot
+      // already used by the main dashboard, avoiding a second scan/API request.
+      const mobile=await getJson(`/api/mobile/status?native_shadow_fallback=${Date.now()}`);
+      renderShadow(mobile);
     }catch(err){
       const s=panel.querySelector('#nativeShadowSummary');
       if(s)s.textContent=`Shadow 상태 확인 실패: ${err?.message||err}`;
@@ -237,9 +243,6 @@
     setDetailed(false);
     organize();
 
-    // Bounded installation retries replace a broad subtree MutationObserver.
-    // Live status rendering rewrites many table rows; observing all childList changes
-    // made the WebView do needless work while the user was scrolling.
     let attempts=0;
     let installTimer=setInterval(()=>{
       organize();
@@ -250,14 +253,24 @@
       }
     },350);
 
+    const onStatus=e=>{
+      const tab=document.body?.dataset.mobileTab;
+      if(document.hidden||(tab&&tab!=='home'&&tab!=='learn'))return;
+      renderShadow(e?.detail?.data||window.stockClassicFastStart?.latest);
+    };
+    window.addEventListener('stocktrader:status-data',onStatus);
+
     refreshShadow(true);
-    const shadowTimer=setInterval(()=>refreshShadow(false),30000);
+    const fallbackTimer=setInterval(()=>{
+      if(!window.stockClassicFastStart?.latest)refreshShadow(false);
+    },15000);
     const onVisibility=()=>{if(!document.hidden&&(document.body?.dataset.mobileTab==='home'||document.body?.dataset.mobileTab==='learn'))refreshShadow(true)};
     document.addEventListener('visibilitychange',onVisibility);
 
     window.addEventListener('pagehide',()=>{
       if(installTimer)clearInterval(installTimer);
-      clearInterval(shadowTimer);
+      clearInterval(fallbackTimer);
+      window.removeEventListener('stocktrader:status-data',onStatus);
       document.removeEventListener('visibilitychange',onVisibility);
     },{once:true});
   }

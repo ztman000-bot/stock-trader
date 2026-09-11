@@ -46,7 +46,13 @@ class FastResumeHotfixTests(unittest.TestCase):
         self.assertIn('cacheWrite(h)', src)
         self.assertIn('restoreCachedHealth()', src)
         self.assertIn('CACHED ${score.toFixed(1)}', src)
-        self.assertIn('setTimeout(refresh,restored?250:1000)', src)
+        # Cached Data Health still renders immediately. The network refresh is now
+        # deliberately deferred on the native dashboard so it cannot compete with
+        # first paint; opening the Research tab requests fresh data immediately.
+        self.assertIn('const firstDelay=', src)
+        self.assertIn('const firstTimer=setTimeout(()=>refresh(),firstDelay)', src)
+        self.assertIn("data-mobile-tab", src)
+        self.assertIn('저장값 즉시 표시', src)
         self.assertNotIn('/api/nh/order', src)
 
     def test_service_worker_does_not_cache_api_responses(self):

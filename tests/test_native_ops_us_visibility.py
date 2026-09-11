@@ -30,8 +30,16 @@ class NativeOpsUsVisibilityTests(unittest.TestCase):
 
     def test_bootstrap_loads_visibility_module_for_native_client(self):
         src = text('js/app-safe.js')
-        self.assertIn("import('./native-ops-us-visibility.js?v=1789220000')", src)
+        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}", src)
+        self.assertIn("native-compact-ui.js?v=${ASSET_VERSION}", src)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'", src)
+
+    def test_native_visibility_reuses_shared_status_for_paper_policy(self):
+        src = text('js/native-ops-us-visibility.js')
+        self.assertIn('window.stockClassicFastStart?.latest', src)
+        self.assertIn('stocktrader:status-data', src)
+        self.assertIn('renderPaperPolicy', src)
+        self.assertIn('native_policy_fallback', src)
 
     def test_native_visibility_does_not_watch_subtree_childlist(self):
         src = text('js/native-ops-us-visibility.js')

@@ -47,19 +47,28 @@
     return box;
   }
 
+  function renderPaperPolicy(d){
+    const box=ensurePaperPolicy();
+    if(!box||!d)return false;
+    const daily=d?.daily||{},loop=d?.paperLoop||{},risk=d?.risk||{};
+    const riskTrade=document.querySelector('#riskTradeText')?.textContent||'0.35%';
+    const exit=document.querySelector('#exitText')?.textContent||'-1.0% 손절 · +1.5% Trail 시작 · 0.8% Trail';
+    const maxPos=risk.maxOpenPositions||document.querySelector('#maxPositionsText')?.textContent||'2';
+    const lossLimit=Math.abs(num(daily.lossLimit));
+    box.innerHTML=`<strong>${loop.running?'자동 Paper 루프 RUNNING':'자동 Paper 루프 CHECK'} · 앱 스위치 조작 불가 · REAL ORDER OFF</strong><br>진입 ${d.entryStart||'09:30'}~${d.entryCutoff||'14:50'} · EOD ${d.eodExit||'15:15'} · 1회 리스크 ${riskTrade} · 동시 ${maxPos}<br>${exit} · 2연속 손실 Lock · 일손실 ${lossLimit?`₩${fmtInt(lossLimit)}`:'0.75%'} Lock · 일 최대 ${daily.maxDailyTrades||8}건`;
+    return true;
+  }
+
   async function refreshPaperPolicy(force=false){
     if(paperBusy||(!force&&document.hidden))return;
+    const shared=window.stockClassicFastStart?.latest;
+    if(shared){renderPaperPolicy(shared);return}
     const box=ensurePaperPolicy();
     if(!box)return;
     paperBusy=true;
     try{
-      const d=await json(`/api/mobile/status?native_policy=${Date.now()}`);
-      const daily=d?.daily||{},loop=d?.paperLoop||{},risk=d?.risk||{};
-      const riskTrade=document.querySelector('#riskTradeText')?.textContent||'0.35%';
-      const exit=document.querySelector('#exitText')?.textContent||'-1.0% 손절 · +1.5% Trail 시작 · 0.8% Trail';
-      const maxPos=risk.maxOpenPositions||document.querySelector('#maxPositionsText')?.textContent||'2';
-      const lossLimit=Math.abs(num(daily.lossLimit));
-      box.innerHTML=`<strong>${loop.running?'자동 Paper 루프 RUNNING':'자동 Paper 루프 CHECK'} · 앱 스위치 조작 불가 · REAL ORDER OFF</strong><br>진입 ${d.entryStart||'09:30'}~${d.entryCutoff||'14:50'} · EOD ${d.eodExit||'15:15'} · 1회 리스크 ${riskTrade} · 동시 ${maxPos}<br>${exit} · 2연속 손실 Lock · 일손실 ${lossLimit?`₩${fmtInt(lossLimit)}`:'0.75%'} Lock · 일 최대 ${daily.maxDailyTrades||8}건`;
+      const d=await json(`/api/mobile/status?native_policy_fallback=${Date.now()}`);
+      renderPaperPolicy(d);
     }catch(e){
       box.textContent=`서버 Paper 통제 상태 확인 실패: ${e?.message||e}`;
     }finally{
@@ -120,8 +129,15 @@
     installTick();
     if(attempts<24)installTimer=setInterval(installTick,500);
 
-    refreshPaperPolicy(true);
-    if(document.body?.dataset.market==='us')refreshUs(true);
+    const shared=window.stockClassicFastStart?.latest;
+    if(shared)renderPaperPolicy(shared);
+    else setTimeout(()=>refreshPaperPolicy(true),1400);
+    if(document.body?.dataset.market==='us')setTimeout(()=>refreshUs(true),350);
+
+    const onStatus=e=>{
+      if(document.body?.dataset.mobileTab==='home')renderPaperPolicy(e?.detail?.data||window.stockClassicFastStart?.latest);
+    };
+    window.addEventListener('stocktrader:status-data',onStatus);
 
     let attrObserver=null;
     if(document.body){
@@ -138,20 +154,15 @@
           }
         }
       });
-      // Deliberately attributes-only. A subtree/childList observer here can observe
-      // this module's own text/innerHTML writes and create a WebView re-render loop.
       attrObserver.observe(document.body,{attributes:true,attributeFilter:['data-market','data-mobile-tab']});
     }
 
     const onClick=e=>{
-      if(e.target?.closest?.('.market-switch button[data-market="us"]'))setTimeout(()=>refreshUs(true),220);
-      if(e.target?.closest?.('#usRefresh'))setTimeout(()=>refreshUs(true),220);
+      if(e.target?.closest?.('.market-switch button[data-market="us"]'))setTimeout(()=>refreshUs(true),180);
+      if(e.target?.closest?.('#usRefresh'))setTimeout(()=>refreshUs(true),180);
     };
     document.addEventListener('click',onClick,true);
 
-    const paperTimer=setInterval(()=>{
-      if(document.body?.dataset.mobileTab==='home')refreshPaperPolicy();
-    },30000);
     const usTimer=setInterval(()=>{
       if(document.body?.dataset.market==='us')refreshUs();
     },30000);
@@ -165,9 +176,9 @@
 
     window.addEventListener('pagehide',()=>{
       if(installTimer)clearInterval(installTimer);
-      clearInterval(paperTimer);
       clearInterval(usTimer);
       attrObserver?.disconnect();
+      window.removeEventListener('stocktrader:status-data',onStatus);
       document.removeEventListener('click',onClick,true);
       document.removeEventListener('visibilitychange',onVisibility);
     },{once:true});

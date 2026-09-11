@@ -12,7 +12,9 @@ class NativeClientUsabilityFixTests(unittest.TestCase):
     def test_app_safe_loads_native_fix_only_for_native_mode(self):
         src=text('js/app-safe.js')
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'",src)
-        self.assertIn("import('./native-client-fixes.js",src)
+        self.assertIn("native-client-fixes.js?v=${ASSET_VERSION}",src)
+        self.assertIn("native-compact-ui.js?v=${ASSET_VERSION}",src)
+        self.assertIn('afterFirstPaint',src)
 
     def test_native_fix_leaves_scroll_clearance_for_fixed_bottom_nav(self):
         src=text('js/native-client-fixes.js')
