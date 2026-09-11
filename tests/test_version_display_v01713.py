@@ -15,7 +15,7 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         index = text('index.html')
         self.assertIn('Stock Day Trader v0.17.15', index)
         self.assertIn('v0.17.15 RELEASE', index)
-        self.assertIn('/js/app-safe.js?v=1789141200', index)
+        self.assertIn('/js/app-safe.js?v=1789143000', index)
         self.assertIn('/styles.css?v=1789005000', index)
         self.assertIn('UI v0.17.10', index)
         self.assertIn('Reliability v0.17.13', index)
@@ -24,12 +24,13 @@ class VersionDisplayReleaseTests(unittest.TestCase):
 
     def test_classic_loads_version_data_health_and_pwa_modules(self):
         boot = text('js/app-safe.js')
-        self.assertIn("const ASSET_VERSION='1789141200'", boot)
+        self.assertIn("const ASSET_VERSION='1789143000'", boot)
         self.assertIn("classic-fast-start.js?v=${ASSET_VERSION}", boot)
         self.assertIn("pwa-install.js?v=${ASSET_VERSION}", boot)
         self.assertIn("version-display.js?v=${ASSET_VERSION}", boot)
         self.assertIn("data-health-ui.js?v=${ASSET_VERSION}", boot)
         self.assertIn("live-app.js?v=${ASSET_VERSION}", boot)
+        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}", boot)
 
     def test_display_separates_release_ui_reliability_and_control(self):
         src = text('js/version-display.js')
