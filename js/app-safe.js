@@ -4,7 +4,7 @@ if (typeof CONFIG.nh.backendBaseUrl !== 'string') CONFIG.nh.backendBaseUrl = '';
 const showBootError=err=>{console.error('Stock Day Trader boot error:',err);const body=document.querySelector('#scannerBody');if(body)body.innerHTML=`<tr><td colspan="9" class="down" style="text-align:left;white-space:normal">앱 로딩 오류: ${String(err?.message||err)}<br>페이지를 새로고침해 주세요.</td></tr>`;const badge=document.querySelector('#systemBadge');if(badge){badge.textContent='APP ERROR';badge.className='badge badbadge'}};
 window.addEventListener('error',e=>showBootError(e.error||e.message));window.addEventListener('unhandledrejection',e=>showBootError(e.reason));
 
-const ASSET_VERSION='1789139000';
+const ASSET_VERSION='1789141200';
 const nativeClient=new URLSearchParams(location.search).get('native')==='1';
 
 if('serviceWorker' in navigator){
@@ -12,7 +12,9 @@ if('serviceWorker' in navigator){
 }
 
 if(nativeClient){
-  import('./native-client-fixes.js?v=1789139000').catch(showBootError);
+  import('./native-client-fixes.js?v=1789141200').catch(showBootError).finally(()=>{
+    import('./native-update-button-hotfix.js?v=1789141200').catch(showBootError);
+  });
 }
 
 const liveClassic=location.pathname==='/classic'||location.pathname.startsWith('/classic/');
