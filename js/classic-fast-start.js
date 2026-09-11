@@ -1,4 +1,4 @@
-// Classic mobile fast-start layer v2.
+// Classic mobile fast-start layer v3.
 // UI transport optimization only: server Paper strategy/order logic is untouched.
 (()=>{
   const STATUS_KEY='stock-trader-classic-status-cache-v2';
@@ -11,6 +11,8 @@
   let statusMemo=null;
   let diskServed=false;
   let diskSnapshot=null;
+  let latestData=null;
+  let latestAt=0;
   const barsMemo=new Map();
 
   const won=n=>'₩'+Math.round(Number(n||0)).toLocaleString('ko-KR');
@@ -42,14 +44,27 @@
     };
   }
 
+  function publishStatus(data,source='network',at=Date.now()){
+    const compact=compactStatus(data)||data;
+    if(!compact||typeof compact!=='object')return null;
+    latestData=compact;
+    latestAt=Number(at||Date.now());
+    window.dispatchEvent(new CustomEvent('stocktrader:status-data',{detail:{data:compact,source,at:latestAt}}));
+    return compact;
+  }
+
   function readDiskStatus(){
-    if(diskSnapshot)return diskSnapshot;
+    if(diskSnapshot){
+      if(!latestData)publishStatus(diskSnapshot.data,'disk',diskSnapshot.at);
+      return diskSnapshot;
+    }
     try{
       const raw=localStorage.getItem(STATUS_KEY);
       if(!raw)return null;
       const saved=JSON.parse(raw),age=Date.now()-Number(saved.at||0);
       if(age<0||age>STATUS_DISK_MAX_AGE||!saved.data)return null;
       diskSnapshot=saved;
+      publishStatus(saved.data,'disk',saved.at);
       return saved;
     }catch{return null}
   }
@@ -57,12 +72,14 @@
   function saveStatus(data){
     try{
       const compact=compactStatus(data);
-      if(!compact)return;
+      if(!compact)return null;
       const saved={at:Date.now(),data:compact};
       localStorage.setItem(STATUS_KEY,JSON.stringify(saved));
       localStorage.removeItem(LEGACY_STATUS_KEY);
       diskSnapshot=saved;
-    }catch{}
+      publishStatus(compact,'network',saved.at);
+      return saved;
+    }catch{return null}
   }
 
   function renderCached(data,savedAt){
@@ -98,7 +115,7 @@
 
   function markFreshUi(){
     document.documentElement.dataset.fastStart='fresh';
-    window.dispatchEvent(new CustomEvent('stocktrader:status-fresh'));
+    window.dispatchEvent(new CustomEvent('stocktrader:status-fresh',{detail:{at:latestAt}}));
   }
 
   function restoreCached(){
@@ -201,9 +218,14 @@
   window.stockClassicFastStart={
     get statusPending(){return !!statusInFlight},
     get source(){return document.documentElement.dataset.fastStart||'network'},
+    get latest(){return latestData},
+    get latestAt(){return latestAt},
     restore:restoreCached,
+    refresh(){
+      return refreshStatusInBackground('/api/mobile/status?fast_refresh='+Date.now(),{cache:'no-store'});
+    },
     clear(){
-      statusMemo=null;diskSnapshot=null;diskServed=false;barsMemo.clear();
+      statusMemo=null;diskSnapshot=null;diskServed=false;latestData=null;latestAt=0;barsMemo.clear();
       try{localStorage.removeItem(STATUS_KEY);localStorage.removeItem(LEGACY_STATUS_KEY)}catch{}
     }
   };
