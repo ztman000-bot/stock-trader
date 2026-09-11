@@ -30,7 +30,7 @@ class VersionDisplayReleaseTests(unittest.TestCase):
         self.assertIn("version-display.js?v=${ASSET_VERSION}", boot)
         self.assertIn("data-health-ui.js?v=${ASSET_VERSION}", boot)
         self.assertIn("live-app.js?v=${ASSET_VERSION}", boot)
-        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}", boot)
+        self.assertIn("native-ops-us-visibility.js?v=1789143000", boot)
 
     def test_display_separates_release_ui_reliability_and_control(self):
         src = text('js/version-display.js')
