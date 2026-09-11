@@ -12,9 +12,9 @@ if('serviceWorker' in navigator){
 }
 
 if(nativeClient){
-  import(`./native-client-fixes.js?v=${ASSET_VERSION}`).catch(showBootError).finally(()=>{
-    import(`./native-update-button-hotfix.js?v=${ASSET_VERSION}`).catch(showBootError).finally(()=>{
-      import(`./native-ops-us-visibility.js?v=${ASSET_VERSION}`).catch(showBootError);
+  import('./native-client-fixes.js?v=1789143000').catch(showBootError).finally(()=>{
+    import('./native-update-button-hotfix.js?v=1789143000').catch(showBootError).finally(()=>{
+      import('./native-ops-us-visibility.js?v=1789143000').catch(showBootError);
     });
   });
 }
