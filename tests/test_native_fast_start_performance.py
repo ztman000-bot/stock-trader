@@ -26,8 +26,24 @@ class NativeFastStartPerformanceTests(unittest.TestCase):
         src = text('js/app-safe.js')
         self.assertIn('native-compact-ui.js?v=${ASSET_VERSION}', src)
         self.assertIn('afterFirstPaint', src)
+        self.assertIn("if(!nativeClient&&'serviceWorker' in navigator)", src)
         self.assertIn('if(!nativeClient)import(`./pwa-install.js', src)
-        self.assertIn('data-health-ui.js?v=${ASSET_VERSION}', src)
+        self.assertIn("importLater('./data-health-ui.js',2200)", src)
+
+    def test_research_scripts_are_lazy_on_native(self):
+        src = text('js/app-safe.js')
+        index = text('index.html')
+        self.assertIn('const loadResearchScripts=()=>', src)
+        self.assertIn("data-mobile-tab')&&document.body.dataset.mobileTab==='learn'", src)
+        self.assertIn("loadClassicScript('/js/history-ui.js'", src)
+        self.assertIn("loadClassicScript('/js/strategy-lab-ui.js'", src)
+        self.assertIn("loadClassicScript('/js/market-lab-ui.js'", src)
+        self.assertIn("loadClassicScript('/js/final-results-ui.js'", src)
+        self.assertNotIn('<script src="/js/history-ui.js', index)
+        self.assertNotIn('<script src="/js/strategy-lab-ui.js', index)
+        self.assertNotIn('<script src="/js/market-lab-ui.js', index)
+        self.assertNotIn('<script src="/js/final-results-ui.js', index)
+        self.assertIn('/js/app-safe.js?v=1789311000', index)
 
     def test_hidden_research_panels_do_not_fetch_during_first_paint(self):
         final = text('js/final-results-ui.js')

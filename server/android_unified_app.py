@@ -14,9 +14,11 @@ import unified_app as base
 from collector import KST
 from db_backup import snapshot as db_snapshot, status as db_backup_status
 from network_access import is_trusted_client_host
+from mobile_status_cache import install as install_mobile_status_cache
 from shadow_continuation import report as shadow_continuation_report
 
 app = base.app
+install_mobile_status_cache(app)
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ANDROID_UPDATE_SCRIPT = BASE_DIR / 'android_update.sh'

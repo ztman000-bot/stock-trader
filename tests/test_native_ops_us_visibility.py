@@ -30,7 +30,7 @@ class NativeOpsUsVisibilityTests(unittest.TestCase):
 
     def test_bootstrap_loads_visibility_module_for_native_client(self):
         src = text('js/app-safe.js')
-        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}", src)
+        self.assertIn("importLater('./native-ops-us-visibility.js',1100)", src)
         self.assertIn("native-compact-ui.js?v=${ASSET_VERSION}", src)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'", src)
 
