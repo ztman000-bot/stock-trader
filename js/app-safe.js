@@ -12,6 +12,21 @@ const afterFirstPaint=(fn,delay=250)=>{
   else window.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(()=>requestAnimationFrame(run)),{once:true});
 };
 const importLater=(path,delay)=>afterFirstPaint(()=>import(`${path}?v=${ASSET_VERSION}`).catch(showBootError),delay);
+const loadClassicScript=(path,id)=>new Promise((resolve,reject)=>{
+  if(document.getElementById(id))return resolve();
+  const s=document.createElement('script');s.id=id;s.src=`${path}?v=${ASSET_VERSION}`;s.defer=true;s.onload=()=>resolve();s.onerror=()=>reject(new Error(`${path} load failed`));document.head.appendChild(s);
+});
+let researchScriptsPromise=null;
+const loadResearchScripts=()=>{
+  if(researchScriptsPromise)return researchScriptsPromise;
+  researchScriptsPromise=Promise.all([
+    loadClassicScript('/js/history-ui.js','lazyHistoryUi'),
+    loadClassicScript('/js/strategy-lab-ui.js','lazyStrategyLabUi'),
+    loadClassicScript('/js/market-lab-ui.js','lazyMarketLabUi'),
+    loadClassicScript('/js/final-results-ui.js','lazyFinalResultsUi'),
+  ]).catch(err=>{researchScriptsPromise=null;showBootError(err);throw err});
+  return researchScriptsPromise;
+};
 
 // Native APK does not need PWA/service-worker boot work. Skipping it avoids
 // WebView startup contention and stale service-worker cache checks.
@@ -26,6 +41,25 @@ if(nativeClient){
   importLater('./native-client-fixes.js',700);
   importLater('./native-update-button-hotfix.js',900);
   importLater('./native-ops-us-visibility.js',1100);
+
+  const activateResearch=()=>setTimeout(()=>loadResearchScripts().catch(()=>{}),80);
+  document.addEventListener('click',e=>{
+    if(e.target?.closest?.('.mobile-nav button[data-tab="learn"],#nativeResearchTabBtn'))activateResearch();
+  },true);
+  const observeResearchTab=()=>{
+    if(!document.body)return setTimeout(observeResearchTab,120);
+    const obs=new MutationObserver(ms=>{
+      if(ms.some(m=>m.type==='attributes'&&m.attributeName==='data-mobile-tab')&&document.body.dataset.mobileTab==='learn')activateResearch();
+    });
+    obs.observe(document.body,{attributes:true,attributeFilter:['data-mobile-tab']});
+    if(document.body.dataset.mobileTab==='learn')activateResearch();
+    window.addEventListener('pagehide',()=>obs.disconnect(),{once:true});
+  };
+  observeResearchTab();
+}else{
+  // Browser/PWA keeps the full research workspace, but it no longer competes
+  // with the shell's first paint.
+  afterFirstPaint(()=>loadResearchScripts().catch(()=>{}),450);
 }
 
 const liveClassic=location.pathname==='/classic'||location.pathname.startsWith('/classic/');
