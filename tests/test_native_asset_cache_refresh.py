@@ -28,15 +28,17 @@ class NativeAssetCacheRefreshTests(unittest.TestCase):
     def test_native_fast_start_assets_are_cache_busted(self):
         app=text('js/app-safe.js')
         index=text('index.html')
-        self.assertIn("const ASSET_VERSION='1789226000'",app)
+        self.assertIn("const ASSET_VERSION='1789311000'",app)
         self.assertIn("native-compact-ui.js?v=${ASSET_VERSION}",app)
-        self.assertIn("native-client-fixes.js?v=${ASSET_VERSION}",app)
-        self.assertIn("native-update-button-hotfix.js?v=${ASSET_VERSION}",app)
-        self.assertIn("native-ops-us-visibility.js?v=${ASSET_VERSION}",app)
+        self.assertIn("importLater('./native-client-fixes.js',700)",app)
+        self.assertIn("importLater('./native-update-button-hotfix.js',900)",app)
+        self.assertIn("importLater('./native-ops-us-visibility.js',1100)",app)
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'",app)
-        self.assertIn('/js/app-safe.js?v=1789226000',index)
-        self.assertIn('/js/history-ui.js?v=1789226000',index)
-        self.assertIn('/js/final-results-ui.js?v=1789226000',index)
+        self.assertIn('/js/app-safe.js?v=1789311000',index)
+        self.assertIn("loadClassicScript('/js/history-ui.js'",app)
+        self.assertIn("loadClassicScript('/js/final-results-ui.js'",app)
+        self.assertNotIn('<script src="/js/history-ui.js',index)
+        self.assertNotIn('<script src="/js/final-results-ui.js',index)
 
 
 if __name__=='__main__':
