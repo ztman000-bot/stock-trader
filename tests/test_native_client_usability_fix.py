@@ -12,7 +12,7 @@ class NativeClientUsabilityFixTests(unittest.TestCase):
     def test_app_safe_loads_native_fix_only_for_native_mode(self):
         src=text('js/app-safe.js')
         self.assertIn("new URLSearchParams(location.search).get('native')==='1'",src)
-        self.assertIn("native-client-fixes.js?v=${ASSET_VERSION}",src)
+        self.assertIn("importLater('./native-client-fixes.js',700)",src)
         self.assertIn("native-compact-ui.js?v=${ASSET_VERSION}",src)
         self.assertIn('afterFirstPaint',src)
 
