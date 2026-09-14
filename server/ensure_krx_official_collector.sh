@@ -5,13 +5,14 @@ cd "$(dirname "$0")"
 HOME=/data/data/com.termux/files/home
 PIDFILE="$HOME/stock-trader-krx-official.pid"
 LOGFILE="$HOME/stock-trader-krx-official.log"
-INSTANCE_VERSION="0.17.15-krx-official-1"
+INSTANCE_VERSION="0.17.15-historical-auto-2"
+DAEMON="$PWD/historical_auto_daemon.py"
 
 pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
   cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  echo "$cmd" | grep -q 'krx_official_daemon.py' &&
+  echo "$cmd" | grep -q 'historical_auto_daemon.py' &&
     echo "$cmd" | grep -q -- "--instance-version $INSTANCE_VERSION"
 }
 
@@ -19,16 +20,18 @@ pid_project(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
   cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  echo "$cmd" | grep -q 'krx_official_daemon.py'
+  echo "$cmd" | grep -Eq 'historical_auto_daemon.py|krx_official_daemon.py|krx_official_collector.py'
 }
 
 pid=""
 [ -f "$PIDFILE" ] && pid=$(cat "$PIDFILE" 2>/dev/null || true)
 if pid_valid "$pid"; then
-  echo "[OK] Official KRX research collector already running (pid=$pid)."
+  echo "[OK] Historical market research collector already running (pid=$pid)."
   exit 0
 fi
 
+# Upgrade path: stop the previous KRX-only daemon before starting the new
+# public-data-first supervisor so two historical collectors never compete.
 if pid_project "$pid"; then
   kill -TERM "$pid" 2>/dev/null || true
   for _ in $(seq 1 10); do
@@ -39,14 +42,14 @@ if pid_project "$pid"; then
 fi
 
 rm -f "$PIDFILE" 2>/dev/null || true
-nohup python "$PWD/krx_official_daemon.py" --instance-version "$INSTANCE_VERSION" >>"$LOGFILE" 2>&1 &
+nohup python "$DAEMON" daemon --instance-version "$INSTANCE_VERSION" >>"$LOGFILE" 2>&1 &
 pid=$!
 echo "$pid" > "$PIDFILE"
 sleep 0.5
 if pid_valid "$pid"; then
-  echo "[OK] Official KRX research collector started (pid=$pid, version=$INSTANCE_VERSION)."
+  echo "[OK] Historical market research collector started (pid=$pid, version=$INSTANCE_VERSION)."
   exit 0
 fi
 
-echo '[WARN] Official KRX research collector failed to stay running.'
+echo '[WARN] Historical market research collector failed to stay running.'
 exit 1
