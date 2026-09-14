@@ -11,7 +11,7 @@ pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
   cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  echo "$cmd" | grep -q 'krx_official_collector.py' &&
+  echo "$cmd" | grep -q 'krx_official_daemon.py' &&
     echo "$cmd" | grep -q -- "--instance-version $INSTANCE_VERSION"
 }
 
@@ -19,7 +19,7 @@ pid_project(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
   cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  echo "$cmd" | grep -q 'krx_official_collector.py'
+  echo "$cmd" | grep -q 'krx_official_daemon.py'
 }
 
 pid=""
@@ -39,7 +39,7 @@ if pid_project "$pid"; then
 fi
 
 rm -f "$PIDFILE" 2>/dev/null || true
-nohup python "$PWD/krx_official_collector.py" daemon --instance-version "$INSTANCE_VERSION" >>"$LOGFILE" 2>&1 &
+nohup python "$PWD/krx_official_daemon.py" --instance-version "$INSTANCE_VERSION" >>"$LOGFILE" 2>&1 &
 pid=$!
 echo "$pid" > "$PIDFILE"
 sleep 0.5
