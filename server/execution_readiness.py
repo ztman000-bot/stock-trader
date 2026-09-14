@@ -1,7 +1,7 @@
 """Read-only execution architecture contract for future Micro Live work.
 
 This module deliberately contains no broker client, credential access, order endpoint,
-or database mutation.  It captures the execution-safety ideas we want to validate
+or database mutation. It captures the execution-safety ideas we want to validate
 before any real-order implementation exists: explicit order states, guarded state
 transitions, deterministic client-order keys, and broker/internal reconciliation.
 
@@ -10,6 +10,7 @@ Control v0.8.0 and Paper semantics are intentionally outside this module.
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 from typing import Iterable, Mapping
 
@@ -32,7 +33,7 @@ ORDER_STATES = (
 )
 TERMINAL_STATES = frozenset({"FILLED", "CANCELED", "REJECTED", "EXPIRED"})
 
-# Conservative lifecycle contract.  A future broker adapter may translate NH-specific
+# Conservative lifecycle contract. A future broker adapter may translate NH-specific
 # messages into these states, but it must not bypass this transition guard.
 _ALLOWED_TRANSITIONS = {
     "INITIALIZED": frozenset({"SUBMITTED", "REJECTED"}),
@@ -57,7 +58,7 @@ def _state(value: object) -> str:
 def transition_allowed(current: object, new: object) -> bool:
     """Return whether an order may move from *current* to *new*.
 
-    Terminal states are intentionally immutable.  PARTIALLY_FILLED ->
+    Terminal states are intentionally immutable. PARTIALLY_FILLED ->
     PARTIALLY_FILLED is allowed because multiple fills can arrive before completion.
     """
 
@@ -88,7 +89,7 @@ def client_order_key(
     """Create a deterministic idempotency key for a future broker adapter.
 
     The same logical signal and attempt produce the same key, so a retry can be
-    recognized instead of accidentally becoming a second order.  Incrementing
+    recognized instead of accidentally becoming a second order. Incrementing
     *attempt* represents an intentional new/replacement order.
     """
 
@@ -132,7 +133,7 @@ def reconcile_orders(
 ) -> dict[str, object]:
     """Pure comparison of internal and broker snapshots.
 
-    No broker call is made here.  The future NH adapter will supply snapshots.  The
+    No broker call is made here. The future NH adapter will supply snapshots. The
     comparison intentionally treats any mismatch as something requiring operator or
     recovery logic rather than silently repairing state.
     """
@@ -212,3 +213,7 @@ def readiness_report() -> dict[str, object]:
             "mutatesPaper": False,
         },
     }
+
+
+if __name__ == "__main__":
+    print(json.dumps(readiness_report(), ensure_ascii=False, indent=2))
