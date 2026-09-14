@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 HOME=/data/data/com.termux/files/home
 PIDFILE="$HOME/stock-trader-krx-official.pid"
 LOGFILE="$HOME/stock-trader-krx-official.log"
-INSTANCE_VERSION="0.17.15-historical-auto-2"
+INSTANCE_VERSION="0.17.15-historical-auto-3"
 DAEMON="$PWD/historical_auto_daemon.py"
 
 pid_valid(){
@@ -30,8 +30,8 @@ if pid_valid "$pid"; then
   exit 0
 fi
 
-# Upgrade path: stop the previous KRX-only daemon before starting the new
-# public-data-first supervisor so two historical collectors never compete.
+# Upgrade path: stop older KRX-only/public-first supervisors before starting the
+# GitHub-regime-first supervisor so multiple historical collectors never compete.
 if pid_project "$pid"; then
   kill -TERM "$pid" 2>/dev/null || true
   for _ in $(seq 1 10); do
