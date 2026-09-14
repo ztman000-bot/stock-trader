@@ -11,6 +11,7 @@ REMOTE_HEALTH_GUARDIAN_PIDFILE="$HOME/stock-trader-remote-health-guardian.pid"
 REMOTE_HEALTH_GUARDIAN_VERSION="0.17.13"
 OFFSITE_BACKUP_ENSURE="$PWD/ensure_offsite_backup.sh"
 SHADOW_CONTINUATION_ENSURE="$PWD/ensure_shadow_continuation.sh"
+KRX_OFFICIAL_ENSURE="$PWD/ensure_krx_official_collector.sh"
 SKIP_WATCHDOG="${ANDROID_SKIP_WATCHDOG:-0}"
 
 if [ ! -f ".env" ]; then
@@ -105,6 +106,14 @@ if [ -f "$SHADOW_CONTINUATION_ENSURE" ]; then
   bash "$SHADOW_CONTINUATION_ENSURE" || echo '[WARN] Shadow continuation research unavailable; normal Paper/Control remains unchanged.'
 fi
 
+# Official KRX historical collector is isolated from NH/Paper. It makes no KRX
+# request until a locally stored, approved AUTH_KEY is present, and it waits for
+# the EOD research window before daily sync/backfill work.
+if [ -f "$KRX_OFFICIAL_ENSURE" ]; then
+  chmod +x "$KRX_OFFICIAL_ENSURE" 2>/dev/null || true
+  bash "$KRX_OFFICIAL_ENSURE" || echo '[WARN] Official KRX research collector unavailable; normal Paper/Control remains unchanged.'
+fi
+
 watchdog_pid_valid(){
   local pid="${1:-}" cmd=""
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
@@ -137,6 +146,7 @@ echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v0.17.13 stability guard + safe updater enabled"
 echo "- Remote health beacon v0.17.12 + independent guardian v0.17.13 enabled"
 echo "- Same-stock reentry/after-lock Shadow continuation research enabled"
+echo "- Official KRX EOD/history collector: approval-key gated, research only"
 echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
 echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
