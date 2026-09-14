@@ -106,12 +106,13 @@ if [ -f "$SHADOW_CONTINUATION_ENSURE" ]; then
   bash "$SHADOW_CONTINUATION_ENSURE" || echo '[WARN] Shadow continuation research unavailable; normal Paper/Control remains unchanged.'
 fi
 
-# Official KRX historical collector is isolated from NH/Paper. It makes no KRX
-# request until a locally stored, approved AUTH_KEY is present, and it waits for
-# the EOD research window before daily sync/backfill work.
+# Historical reference collector is isolated from NH/Paper. It prefers the free
+# Financial Services Commission/data.go.kr official APIs and uses KRX Data
+# Marketplace only as an explicitly enabled optional supplement. All network work
+# waits for the EOD research window and locally stored keys.
 if [ -f "$KRX_OFFICIAL_ENSURE" ]; then
   chmod +x "$KRX_OFFICIAL_ENSURE" 2>/dev/null || true
-  bash "$KRX_OFFICIAL_ENSURE" || echo '[WARN] Official KRX research collector unavailable; normal Paper/Control remains unchanged.'
+  bash "$KRX_OFFICIAL_ENSURE" || echo '[WARN] Historical market research collector unavailable; normal Paper/Control remains unchanged.'
 fi
 
 watchdog_pid_valid(){
@@ -146,7 +147,7 @@ echo "- Realtime/API first, heavy research staggered"
 echo "- Android watchdog v0.17.13 stability guard + safe updater enabled"
 echo "- Remote health beacon v0.17.12 + independent guardian v0.17.13 enabled"
 echo "- Same-stock reentry/after-lock Shadow continuation research enabled"
-echo "- Official KRX EOD/history collector: approval-key gated, research only"
+echo "- Historical EOD collector: data.go.kr free official source first, optional KRX supplement"
 echo "- API guard: localhost or Tailscale 100.64.0.0/10 only"
 echo "- Encrypted offsite DB backup: opt-in only (default OFF)"
 echo "- Listen: 0.0.0.0:8000 (use Tailscale IP from another device)"
