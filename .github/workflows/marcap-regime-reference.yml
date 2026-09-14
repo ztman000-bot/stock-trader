@@ -1,0 +1,80 @@
+name: Marcap Regime Reference
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sunday 18:30 UTC = Monday 03:30 KST. Historical reference only; no need for intraday cadence.
+    - cron: '30 18 * * 0'
+  push:
+    branches: [main]
+    paths:
+      - 'server/marcap_regime_builder.py'
+      - '.github/workflows/marcap-regime-reference.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: marcap-regime-reference
+  cancel-in-progress: false
+
+jobs:
+  build-regime-reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build-only parquet dependencies
+        run: python -m pip install --disable-pip-version-check pandas pyarrow
+
+      - name: Resolve upstream FinanceData/marcap commit
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git ls-remote https://github.com/FinanceData/marcap.git refs/heads/master | awk '{print $1}')
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Build compact aggregate reference
+        run: |
+          python server/marcap_regime_builder.py build \
+            --output research/regime/marcap_regime_daily.csv \
+            --meta research/regime/marcap_regime_meta.json \
+            --upstream-ref '${{ steps.upstream.outputs.sha }}' \
+            --mode auto
+          python server/marcap_regime_builder.py validate \
+            --output research/regime/marcap_regime_daily.csv
+
+      - name: Verify generated output is aggregate only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f research/regime/marcap_regime_daily.csv
+          test -f research/regime/marcap_regime_meta.json
+          ! find research/regime -type f \( -name '*.parquet' -o -name '*.gz' -o -name '*.zip' \) | grep -q .
+          ! head -1 research/regime/marcap_regime_daily.csv | grep -q ',Code,'
+
+      - name: Commit updated aggregate reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add research/regime/marcap_regime_daily.csv research/regime/marcap_regime_meta.json
+          if git diff --cached --quiet; then
+            echo 'No regime-reference changes.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'research: refresh marcap regime aggregate [skip ci]'
+          git pull --rebase origin main
+          git push origin HEAD:main
