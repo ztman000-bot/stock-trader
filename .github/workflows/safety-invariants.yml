@@ -32,5 +32,6 @@ jobs:
           bash -n server/remote_health_guardian.sh
           bash -n server/ensure_offsite_backup.sh
           bash -n server/ensure_shadow_continuation.sh
+          bash -n server/ensure_krx_official_collector.sh
       - name: Run safety and validation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
