@@ -30,13 +30,19 @@ def source_status() -> dict[str, object]:
     paid_enabled = krx._bool_cfg("KRX_OFFICIAL_AUTO_COLLECT", False)
     paid_ready = krx.auth_key_configured()
 
+    # Keep the historical/raw-reference primarySource semantics backward compatible:
+    # when an operator explicitly enables an approved official source, that source
+    # remains the primary raw reference. The keyless GitHub aggregate is separately
+    # identified as regimePrimarySource because its role is market context only.
     primary = None
-    if github_enabled:
-        primary = github_regime.SOURCE
-    elif public_enabled and public_ready:
+    if public_enabled and public_ready:
         primary = public.SOURCE
     elif paid_enabled and paid_ready:
         primary = krx.SOURCE
+    elif github_enabled:
+        primary = github_regime.SOURCE
+
+    regime_primary = github_regime.SOURCE if github_enabled else None
 
     return {
         "ok": True,
@@ -44,6 +50,7 @@ def source_status() -> dict[str, object]:
         "realOrderEnabled": False,
         "controlStrategy": "v0.8.0 LOCKED",
         "primarySource": primary,
+        "regimePrimarySource": regime_primary,
         "githubRegimeReference": {
             "source": github_regime.SOURCE,
             "enabled": github_enabled,
