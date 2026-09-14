@@ -146,7 +146,7 @@ class FscPublicCollectorTests(unittest.TestCase):
     def test_collect_date_imports_public_official_data_and_provenance(self):
         result = public.collect_date(
             date(2026, 9, 11),
-            service_key="TEST%2BKEY%2F%3D",
+            service_key="TEST+KEY/=",
             opener=self.fake_opener,
             path=self.db,
             interval_sec=0,
@@ -183,7 +183,7 @@ class FscPublicCollectorTests(unittest.TestCase):
     def test_second_collect_is_idempotent_and_uses_cache(self):
         public.collect_date(
             date(2026, 9, 11),
-            service_key="TEST%2BKEY%2F%3D",
+            service_key="TEST+KEY/=",
             opener=self.fake_opener,
             path=self.db,
             interval_sec=0,
@@ -194,7 +194,7 @@ class FscPublicCollectorTests(unittest.TestCase):
 
         second = public.collect_date(
             date(2026, 9, 11),
-            service_key="TEST%2BKEY%2F%3D",
+            service_key="TEST+KEY/=",
             opener=should_not_call,
             path=self.db,
             interval_sec=0,
@@ -203,6 +203,10 @@ class FscPublicCollectorTests(unittest.TestCase):
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0], 2)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM index_daily").fetchone()[0], 2)
+
+    def test_encoded_env_service_key_is_normalized_once(self):
+        with patch.dict(os.environ, {"DATA_GO_KR_SERVICE_KEY": "TEST%2BKEY%2F%3D"}, clear=False):
+            self.assertEqual(public._service_key(), "TEST+KEY/=")
 
     def test_access_error_never_leaks_service_key(self):
         secret = "VERY_SECRET_KEY_123"
