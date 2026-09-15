@@ -16,9 +16,50 @@ Source priority for historical context:
 
 The Android phone does **not** clone the upstream repository and does **not** download
 30+ years of per-stock parquet files. A GitHub Action processes the public yearly files
-off-device and commits only a small market-level aggregate CSV to this repository.
-The phone then downloads that compact CSV and stores it in a separate
+off-device and proposes only a small market-level aggregate CSV and its provenance
+metadata through a pull request. After Safety and review, the phone downloads the
+merged compact CSV from `main` and stores it in a separate
 `regime_reference.db`.
+
+## Aggregate publication: PR, Safety, then review
+
+The weekly schedule remains Monday 03:30 KST. Manual runs must select `main`.
+Publication now follows this sequence:
+
+1. Check out the latest `main`, resolve the upstream commit and build the aggregate.
+2. Validate the output and run the complete safety test family before publishing.
+3. Refuse unexpected staged files, non-aggregate changes or a changed `main` base.
+4. If an open `automation/marcap-regime-*` PR exists, leave it unchanged and wait
+   for review. Otherwise, push a new run/attempt-specific branch containing only
+   `research/regime/marcap_regime_daily.csv` and `research/regime/marcap_regime_meta.json`.
+5. Open a PR targeting `main`. An operator approves workflow execution when GitHub
+   requests it, waits for **Safety Invariants on the current PR head** to pass,
+   reviews the diff and provenance, and then merges through the PR.
+6. Verify post-merge main Safety. Android sync continues to read only merged `main`.
+
+There is no direct push to `main`, CI-skip marker, force-push, automatic approval,
+automatic merge, or fallback that bypasses a permission/Safety failure. The builder's
+pre-PR tests are not a substitute for the PR's own Safety check. A successful build
+with a pending PR does not mean Android has received the proposed data.
+
+The workflow uses the built-in `GITHUB_TOKEN`, with only `contents: write` and
+`pull-requests: write` in its publication job; no PAT or broker credentials are added.
+The repository must allow GitHub Actions to create pull requests in
+**Settings > Actions > General > Workflow permissions**. If GitHub denies creation,
+the job stops; the maintainer must resolve the permission explicitly. If creation
+fails after a branch push, that branch remains unmerged for inspection. A workflow
+rerun uses a new attempt-specific branch and does not overwrite it.
+
+GitHub documents that `GITHUB_TOKEN`-created/updated PRs can have approval-required
+workflow runs. Select **Approve workflows to run** when shown; never treat a
+missing or pending Safety result as a pass. See
+[GitHub's token event rules](https://docs.github.com/en/actions/concepts/security/github_token)
+and [repository Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository).
+
+This change does not configure repository branch protection or rulesets. For
+server-enforced protection, the maintainer should require PRs and the Safety check
+for `main`, including approval invalidation/check revalidation after a head update.
+The workflow itself never merges, even if repository protection is not configured.
 
 The aggregate contains, per date and market:
 
