@@ -1,8 +1,8 @@
 {
   "controlStrategy": "v0.8.0 LOCKED",
   "firstDate": "1995-05-02",
-  "generatedAt": "2026-09-14T21:40:33+00:00",
-  "lastDate": "2026-09-11",
+  "generatedAt": "2026-09-15T16:15:52+00:00",
+  "lastDate": "2026-09-14",
   "markets": [
     "KOSDAQ",
     "KOSPI"
@@ -11,10 +11,10 @@
   "rawRowsRedistributed": false,
   "rawUpstreamCodeCopied": false,
   "realOrderEnabled": false,
-  "rowCount": 15462,
+  "rowCount": 15464,
   "schemaVersion": 1,
   "source": "GITHUB_FINANCEDATA_MARCAP_AGG",
   "upstreamLicenseNote": "FinanceData/marcap reported no machine-readable repository licence when this adapter was created; retain attribution and use only compact aggregate research facts.",
-  "upstreamRef": "e73278734f968fbb93eada04b0f584a48e9ad53d",
+  "upstreamRef": "dd3ee7850205e49322bed2aed51443122bc31836",
   "upstreamRepo": "FinanceData/marcap"
 }
