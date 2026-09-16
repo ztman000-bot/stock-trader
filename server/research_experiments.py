@@ -35,11 +35,17 @@ def code_digest():
 
 def snapshot_digest(candidates, through):
     """Hash candidate inputs and their completed historical bars, excluding later bars."""
-    records, bars = [], {}
+    records, bars, visited_rows = [], {}, set()
     for candidate in candidates:
         if str(candidate['date']) > through:
             continue
         records.append({k: v for k, v in candidate.items() if k != 'rows'})
+        # Candidates for a code share the same bar array. Scan it once, rather
+        # than once per signal, to keep hashing inexpensive on Android.
+        row_key = (str(candidate['code']), id(candidate.get('rows')))
+        if row_key in visited_rows:
+            continue
+        visited_rows.add(row_key)
         for row in candidate.get('rows', []):
             if str(row['bucket'])[:10] <= through:
                 bars[(str(candidate['code']), str(row['bucket']))] = dict(row)
