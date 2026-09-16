@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'server/marcap_regime_builder.py'
+      - 'server/regime_aggregate_schema.py'
       - '.github/scripts/propose_regime_reference.py'
       - '.github/workflows/marcap-regime-reference.yml'
 

@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 from urllib.request import Request, urlopen
+from regime_aggregate_schema import SCHEMA_VERSION, EXTRA_FIELDS, validate_rows
 
 UPSTREAM_REPO = "FinanceData/marcap"
 UPSTREAM_BRANCH = "master"
@@ -58,7 +59,7 @@ SUMMARY_FIELDS = (
     "regime",
     "source",
     "source_ref",
-)
+) + EXTRA_FIELDS
 
 
 def _finite(value: object, default: float = 0.0) -> float:
@@ -101,9 +102,16 @@ def add_rolling_regime(rows: Iterable[Mapping[str, object]]) -> list[dict[str, o
         return_window: deque[float] = deque(maxlen=20)
         amount_window: deque[float] = deque(maxlen=20)
         for item in items:
-            breadth_window.append(_finite(item.get("advance_ratio"), 0.5))
-            daily_pct = _finite(item.get("cap_weighted_change_pct"))
-            return_window.append(daily_pct)
+            breadth = _finite(item.get("advance_ratio"), math.nan)
+            daily_pct = _finite(item.get("cap_weighted_change_pct"), math.nan)
+            if math.isfinite(breadth):
+                breadth_window.append(breadth)
+            else:
+                breadth_window.clear()
+            if math.isfinite(daily_pct):
+                return_window.append(daily_pct)
+            else:
+                return_window.clear()
             amount = max(0.0, _finite(item.get("turnover_amount")))
             amount_window.append(amount)
 
@@ -116,15 +124,15 @@ def add_rolling_regime(rows: Iterable[Mapping[str, object]]) -> list[dict[str, o
             amount_median = statistics.median(amount_window) if amount_window else 0.0
             turnover_ratio = (amount / amount_median) if amount_median > 0 else 0.0
 
-            if len(return_window) < 10 or len(breadth_window) < 5:
+            if len(return_window) < 20 or len(breadth_window) < 5:
                 score, regime = 0, "WARMUP"
             else:
                 score, regime = classify_regime(weighted_return_20d, breadth_5d, volatility_20d)
 
             item.update(
-                breadth_5d=round(breadth_5d, 6),
-                weighted_return_20d=round(weighted_return_20d, 6),
-                volatility_20d=round(volatility_20d, 6),
+                breadth_5d=round(breadth_5d, 6) if breadth_window else None,
+                weighted_return_20d=round(weighted_return_20d, 6) if len(return_window) == 20 else None,
+                volatility_20d=round(volatility_20d, 6) if len(return_window) == 20 else None,
                 turnover_ratio_20d=round(turnover_ratio, 6),
                 regime_score=score,
                 regime=regime,
@@ -161,45 +169,37 @@ def aggregate_parquet(path: Path, source_ref: str) -> list[dict[str, object]]:
     for col in ("Volume", "Amount", "ChangesRatio", "Marcap"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df[df["Market"].isin(MARKETS) & df["Date"].notna()]
-    # Suspended/no-trade rows are excluded from breadth denominators but remain a
-    # known upstream limitation; this summary is for regime context, not fills.
-    df = df[df["Volume"].fillna(0) > 0]
-
     out: list[dict[str, object]] = []
     for (trade_date, market), group in df.groupby([df["Date"].dt.date, "Market"], sort=True):
-        changes = group["ChangesRatio"].dropna()
-        caps = group["Marcap"].fillna(0).clip(lower=0)
-        cap_total = float(caps.sum())
-        if cap_total > 0:
-            weighted = float((group["ChangesRatio"].fillna(0) * caps).sum() / cap_total)
-            top10_share = float(caps.nlargest(10).sum() / cap_total)
-        else:
-            weighted = 0.0
-            top10_share = 0.0
-        active = int(len(group))
-        advancers = int((changes > 0).sum())
-        decliners = int((changes < 0).sum())
-        unchanged = max(0, active - advancers - decliners)
-        denom = max(1, advancers + decliners + unchanged)
-        out.append(
-            {
-                "trade_date": trade_date.isoformat(),
-                "market": str(market),
-                "active_count": active,
-                "advancers": advancers,
-                "decliners": decliners,
-                "unchanged": unchanged,
-                "advance_ratio": round(advancers / denom, 6),
-                "decline_ratio": round(decliners / denom, 6),
-                "turnover_amount": round(float(group["Amount"].fillna(0).sum()), 2),
-                "market_cap_total": round(cap_total, 2),
-                "top10_cap_share": round(top10_share, 6),
-                "cap_weighted_change_pct": round(weighted, 6),
-                "median_change_pct": round(float(changes.median()) if not changes.empty else 0.0, 6),
-                "source_ref": source_ref,
-            }
-        )
+        out.append(aggregate_market(group.to_dict('records'), trade_date.isoformat(), str(market), source_ref))
     return out
+
+
+def aggregate_market(records, trade_date, market, source_ref):
+    """All supplied issues for capitalization; traded issues with known returns for breadth."""
+    records = list(records)
+    active = [r for r in records if _finite(r.get('Volume')) > 0]
+    observed = [r for r in active if math.isfinite(_finite(r.get('ChangesRatio'), math.nan))]
+    changes = [float(r['ChangesRatio']) for r in observed]
+    caps = sorted((max(0, _finite(r.get('Marcap'))) for r in records), reverse=True)
+    cap_total = sum(caps)
+    valid_cap = sum(max(0, _finite(r.get('Marcap'))) for r in observed)
+    weighted = sum(float(r['ChangesRatio']) * max(0, _finite(r.get('Marcap'))) for r in observed)
+    up, down, flat = (sum(test(x) for x in changes) for test in (lambda x: x > 0, lambda x: x < 0, lambda x: x == 0))
+    return {'trade_date': trade_date, 'market': market, 'schema_version': SCHEMA_VERSION,
+            'universe_count': len(records), 'active_count': len(active),
+            'return_observation_count': len(observed), 'missing_return_count': len(active) - len(observed),
+            'advancers': up, 'decliners': down, 'unchanged': flat,
+            'advance_ratio': round(up / len(observed), 6) if observed else None,
+            'decline_ratio': round(down / len(observed), 6) if observed else None,
+            'turnover_amount': round(sum(max(0, _finite(r.get('Amount'))) for r in records), 2),
+            'market_cap_total': round(cap_total, 2),
+            'active_market_cap_total': round(sum(max(0, _finite(r.get('Marcap'))) for r in active), 2),
+            'top10_cap_share': round(sum(caps[:10]) / cap_total, 6) if cap_total else 0,
+            'cap_weighted_change_pct': round(weighted / valid_cap, 6) if valid_cap else None,
+            'equal_weight_change_pct': round(statistics.fmean(changes), 6) if changes else None,
+            'median_change_pct': round(statistics.median(changes), 6) if changes else None,
+            'source_ref': source_ref}
 
 
 def _read_existing(path: Path) -> list[dict[str, object]]:
@@ -227,10 +227,7 @@ def validate_summary(path: Path) -> dict[str, object]:
     required = {"trade_date", "market", "advance_ratio", "regime", "source", "source_ref"}
     if not required.issubset(rows[0].keys()):
         raise ValueError("summary header is incomplete")
-    bad_market = [r for r in rows if str(r.get("market")) not in MARKETS]
-    bad_source = [r for r in rows if str(r.get("source")) != SOURCE]
-    if bad_market or bad_source:
-        raise ValueError("summary provenance/market validation failed")
+    schema_version = validate_rows(rows)
     return {
         "ok": True,
         "rows": len(rows),
@@ -239,13 +236,15 @@ def validate_summary(path: Path) -> dict[str, object]:
         "markets": sorted({str(r["market"]) for r in rows}),
         "researchOnly": True,
         "realOrderEnabled": False,
+        "schemaVersion": schema_version,
     }
 
 
 def build(output: Path, meta: Path, upstream_ref: str, mode: str = "auto") -> dict[str, object]:
     current_year = datetime.now(timezone.utc).year
     existing = _read_existing(output)
-    if mode == "recent" or (mode == "auto" and existing):
+    compatible = bool(existing) and all(str(r.get('schema_version')) == str(SCHEMA_VERSION) for r in existing)
+    if compatible and (mode == "recent" or mode == "auto"):
         years = [max(FIRST_YEAR, current_year - 1), current_year]
         refresh_years = set(years)
         kept = [r for r in existing if int(str(r.get("trade_date", "0000"))[:4] or 0) not in refresh_years]
@@ -268,7 +267,16 @@ def build(output: Path, meta: Path, upstream_ref: str, mode: str = "auto") -> di
     meta.write_text(
         json.dumps(
             {
-                "schemaVersion": 1,
+                "schemaVersion": SCHEMA_VERSION,
+                "definitions": {
+                    "market_cap_total": "all upstream issues, including no-trade/suspended rows",
+                    "breadth": "positive-volume issues with finite reported returns; missing returns are not flat",
+                    "equal_weight_change_pct": "arithmetic mean of observed active-issue returns",
+                    "median_change_pct": "median of observed active-issue returns",
+                    "cap_weighted_change_pct": "current-day capitalization weighted observed active returns; not an investable index",
+                    "weighted_return_20d": "compounded descriptive daily reference; not a tradable portfolio return",
+                    "availability": "end-of-day retrospective reference; no historical publication timestamp guaranteed",
+                },
                 "source": SOURCE,
                 "upstreamRepo": UPSTREAM_REPO,
                 "upstreamRef": upstream_ref,

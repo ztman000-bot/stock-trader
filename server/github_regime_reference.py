@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
+from regime_aggregate_schema import EXTRA_FIELDS, validate_rows
 
 KST = ZoneInfo("Asia/Seoul")
 BASE_DIR = Path(__file__).resolve().parent
@@ -159,6 +160,11 @@ def init_db(path: str | os.PathLike[str] | None = None) -> None:
             """
         )
         c.execute("INSERT INTO regime_meta(key,value) VALUES('research_only','true') ON CONFLICT(key) DO UPDATE SET value='true'")
+        columns = {row[1] for row in c.execute('PRAGMA table_info(regime_daily)')}
+        for name in EXTRA_FIELDS:
+            if name not in columns:
+                kind = 'REAL' if name in ('equal_weight_change_pct', 'active_market_cap_total') else 'INTEGER'
+                c.execute(f'ALTER TABLE regime_daily ADD COLUMN {name} {kind}')
 
 
 def _num(row: Mapping[str, str], key: str, integer: bool = False):
@@ -177,12 +183,20 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames or not REQUIRED_FIELDS.issubset(set(reader.fieldnames)):
         raise ValueError("regime summary header is incomplete")
+    rows = list(reader)
+    schema_version = validate_rows(rows)
     now = datetime.now(KST).isoformat(timespec="seconds")
     written = rejected = 0
     first = last = None
     markets: set[str] = set()
     with connect(path) as c:
-        for row in reader:
+        previous_schema = c.execute("SELECT value FROM regime_meta WHERE key='schema_version'").fetchone()
+        if previous_schema and int(previous_schema[0]) > schema_version:
+            raise ValueError('aggregate schema downgrade rejected')
+        # The download is a complete snapshot, not an incremental batch. Remove
+        # rows absent from it inside the same transaction, avoiding mixed versions.
+        c.execute('DELETE FROM regime_daily WHERE source=?', (SOURCE,))
+        for row in rows:
             trade_date = str(row.get("trade_date") or "").strip()
             market = str(row.get("market") or "").strip().upper()
             source = str(row.get("source") or "").strip()
@@ -196,8 +210,10 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
                     advance_ratio,decline_ratio,turnover_amount,market_cap_total,
                     top10_cap_share,cap_weighted_change_pct,median_change_pct,breadth_5d,
                     weighted_return_20d,volatility_20d,turnover_ratio_20d,
-                    regime_score,regime,source,source_ref,synced_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    regime_score,regime,source,source_ref,synced_at,
+                    schema_version,universe_count,return_observation_count,missing_return_count,
+                    equal_weight_change_pct,active_market_cap_total)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(trade_date,market,source) DO UPDATE SET
                     active_count=excluded.active_count,advancers=excluded.advancers,
                     decliners=excluded.decliners,unchanged=excluded.unchanged,
@@ -210,7 +226,12 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
                     volatility_20d=excluded.volatility_20d,
                     turnover_ratio_20d=excluded.turnover_ratio_20d,
                     regime_score=excluded.regime_score,regime=excluded.regime,
-                    source_ref=excluded.source_ref,synced_at=excluded.synced_at""",
+                    source_ref=excluded.source_ref,synced_at=excluded.synced_at,
+                    schema_version=excluded.schema_version,universe_count=excluded.universe_count,
+                    return_observation_count=excluded.return_observation_count,
+                    missing_return_count=excluded.missing_return_count,
+                    equal_weight_change_pct=excluded.equal_weight_change_pct,
+                    active_market_cap_total=excluded.active_market_cap_total""",
                 (
                     trade_date, market,
                     _num(row, "active_count", True), _num(row, "advancers", True),
@@ -222,6 +243,9 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
                     _num(row, "weighted_return_20d"), _num(row, "volatility_20d"),
                     _num(row, "turnover_ratio_20d"), _num(row, "regime_score", True),
                     regime, SOURCE, str(row.get("source_ref") or "").strip(), now,
+                    schema_version, _num(row, 'universe_count', True),
+                    _num(row, 'return_observation_count', True), _num(row, 'missing_return_count', True),
+                    _num(row, 'equal_weight_change_pct'), _num(row, 'active_market_cap_total'),
                 ),
             )
             written += 1
@@ -235,6 +259,7 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
             "first_date": first or "",
             "last_date": last or "",
             "last_import_rows": str(written),
+            "schema_version": str(schema_version),
         }
         for key, value in meta.items():
             c.execute(
@@ -250,6 +275,7 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
         "markets": sorted(markets),
         "researchOnly": True,
         "realOrderEnabled": False,
+        "schemaVersion": schema_version,
     }
 
 
@@ -312,6 +338,12 @@ def collector_status(path: str | os.PathLike[str] | None = None) -> dict[str, ob
             "advanceRatio": row["advance_ratio"],
             "weightedReturn20d": row["weighted_return_20d"],
             "volatility20d": row["volatility_20d"],
+            "schemaVersion": row['schema_version'] or 1,
+            "equalWeightChangePct": row['equal_weight_change_pct'],
+            "medianChangePct": row['median_change_pct'],
+            "marketCapTotal": row['market_cap_total'],
+            "activeMarketCapTotal": row['active_market_cap_total'],
+            "missingReturnCount": row['missing_return_count'],
         }
         for row in latest_rows
     }
@@ -330,6 +362,7 @@ def collector_status(path: str | os.PathLike[str] | None = None) -> dict[str, ob
         "lastSyncAt": _meta("last_sync_at", path),
         "summaryUrlHost": urlparse(summary_url()).hostname,
         "rawPerStockStoredOnPhone": False,
+        "referenceTiming": "retrospective end-of-day; not intraday point-in-time evidence",
     }
 
 

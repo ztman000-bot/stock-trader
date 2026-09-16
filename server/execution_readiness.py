@@ -184,6 +184,13 @@ def readiness_report() -> dict[str, object]:
         "controlStrategy": CONTROL_STRATEGY,
         "realOrderEnabled": REAL_ORDER_ENABLED,
         "microLiveReady": False,
+        "offlineSimulation": {
+            "available": True,
+            "command": "python server/execution_simulation.py selftest",
+            "separateSimulationJournal": True,
+            "nhBrokerValidated": False,
+            "qualifiesForLive": False,
+        },
         "stateModel": {
             "states": list(ORDER_STATES),
             "terminalStates": sorted(TERMINAL_STATES),

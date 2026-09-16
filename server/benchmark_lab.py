@@ -1,4 +1,4 @@
-"""Public Strategy Benchmark Lab v0.17.3.
+"""Public Strategy Benchmark Lab v0.17.16.
 
 Research-only comparison on the SAME locally stored Korean 5-minute data and cost model.
 This is an adaptation/benchmark, not an exact reproduction of any published US result.
@@ -9,7 +9,7 @@ B) Our fixed ORB improvement: ORB+RVOL -> Stocks-in-Play 60+ -> no RED -> EMA9/V
 C) Cross Trend 2.0 fixed baseline with the existing control exit.
 
 All three use GOOD data only, next-bar execution, commission/tax/slippage, chronological
-walk-forward-style time slices, untouched final lockbox, and 2x-slippage + 1-bar-late stress.
+walk-forward-style slices, retrospective development holdout, and cost/delay stress.
 No broker/order call exists here and no live rule is mutated.
 """
 from collections import defaultdict
@@ -20,6 +20,7 @@ from data_quality import quality_map
 from market_lab import _build_regime
 from strategy_lab import _signals
 from stocks_in_play import historical_score
+from research_experiments import development_candidates, candidate_scope
 from profitability_lab import (
     _metrics,_pnl,_resolve_entry_index,_atr_pct,
     EXIT_CONFIGS,ENTRY_MODES,BASE_SLIPPAGE,COMMISSION,SELL_TAX,
@@ -45,6 +46,7 @@ def _net_public(rows,i,stop_pct,slippage=BASE_SLIPPAGE,late_bars=0):
         r=rows[j];dt=_dt(r['bucket'])
         if dt.date()!=day:break
         lo=float(r['low']);cl=float(r['close']);last=cl
+        if float(r['open'])<=entry*(1-stop):exitp=float(r['open']);break
         if lo<=entry*(1-stop):exitp=entry*(1-stop);break
         if dt.hour*60+dt.minute>=915:exitp=cl;break
     if exitp is None:exitp=last
@@ -87,7 +89,7 @@ def _public_candidates(codes,qmap):
                     if nxt<len(rows) and _dt(rows[nxt]['bucket']).date()==day:entry_i=nxt
                     break
             if entry_i is None:continue
-            ap=_atr_pct(rows,max(1,entry_i-1),14);stop=max(.006,min(.015,ap if ap is not None else .010))
+            ap=_atr_pct(rows,entry_i,14);stop=max(.006,min(.015,ap if ap is not None else .010))
             selected.append({**rec,'i':entry_i,'atrStop':stop})
     return selected
 
@@ -167,14 +169,16 @@ def _evaluate(name,kind,cands,dates,tests,lock,cfg=None):
     return {
         'id':kind,'name':name,'full':full,
         'walkForward':{'folds':len(fold_rows),'positiveFolds':positive,'results':fold_rows,'selectionIndependent':True},
-        'lockbox':lock_m,'lockboxStress':stress,
+        'lockbox':lock_m,'lockboxStress':stress,'finalEvidence':False,
+        'holdoutPurpose':'retrospective development comparison; not final validation',
         'pass':bool(lock_m['trades']>=10 and lock_m['profitFactor']>1 and lock_m['expectancyPct']>0 and stress['profitFactor']>=1 and stress['expectancyPct']>=0)
     }
 
 
 def run_benchmark_lab(max_codes=40,profitability=None,robust=None):
-    max_codes=max(10,min(int(max_codes),100));codes=[x['code'] for x in available_codes()[:max_codes]];qmap=quality_map(120)
-    public=_public_candidates(codes,qmap);evaluation_dates=sorted({x['date'] for x in public});tests,lock=_date_plan(evaluation_dates)
+    max_codes=max(10,min(int(max_codes),100));scope=candidate_scope()
+    codes=scope.get('codes') or [x['code'] for x in available_codes()[:max_codes]];qmap=quality_map(scope.get('quality_days',120))
+    public=development_candidates(_public_candidates(codes,qmap));evaluation_dates=sorted({x['date'] for x in public});tests,lock=_date_plan(evaluation_dates)
     our=_our_orb_candidates(codes,qmap,set(evaluation_dates));cross=_cross_candidates(codes,qmap,set(evaluation_dates))
     a=_evaluate('Public-style 5m ORB + RVOL14 Top20','public_orb',public,evaluation_dates,tests,lock)
     b=_evaluate('Our ORB + SIP60 + Pullback + Winner/Fast-Failure','our_orb_pf',our,evaluation_dates,tests,lock,_cfg('winner_extension'))
@@ -188,7 +192,7 @@ def run_benchmark_lab(max_codes=40,profitability=None,robust=None):
     if robust:
         current['currentRobustLockbox']=robust.get('lockbox');current['currentRobustStress']=robust.get('lockboxStress');current['currentRobustPass']=robust.get('pass')
     return {
-        'ok':True,'version':'0.17.3','researchOnly':True,'controlStrategy':'v0.8.0 LOCKED','realOrderEnabled':False,
+        'ok':True,'version':'0.17.16','researchOnly':True,'controlStrategy':'v0.8.0 LOCKED','realOrderEnabled':False,
         'adaptationNotice':'Published US ORB concepts are adapted to the locally stored Korean 5m safe-universe subset. This is not an exact paper replication and published US performance must not be compared directly.',
         'commonEvaluationDays':len(evaluation_dates),'lockboxDays':len(lock),'codesTested':len(codes),
         'costModel':{'commissionEachSide':COMMISSION,'sellTax':SELL_TAX,'baseSlippageEachSide':BASE_SLIPPAGE,'stress':'2x slippage + 1 bar late'},

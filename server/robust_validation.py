@@ -1,13 +1,16 @@
-"""Robust validation v0.17.8.
-GOOD-only data, purged non-overlapping walk-forward development folds, untouched final lockbox,
+"""Robust validation v0.17.16.
+GOOD-only data, purged non-overlapping development folds, precommitted future holdout,
 cost/fill stress, and KR 1-minute Exit Replay validation.
 Research only; Control/live rules are never changed.
 """
 from math import ceil
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import research_experiments as experiments
 
 from profitability_lab import (
     _candidates,_eval,FILTERS,EXIT_CONFIGS,REGIME_MODES,SURGE_MODES,
-    ENTRY_MODES,PLAY_MODES,BASE_SLIPPAGE
+    ENTRY_MODES,PLAY_MODES,BASE_SLIPPAGE,COMMISSION,SELL_TAX,_metrics,available_codes
 )
 
 try:
@@ -28,8 +31,9 @@ LOCKBOX_MIN_TRADES=20
 def _date_slices(cands,folds=WF_FOLDS,purge_days=WF_PURGE_DAYS):
     """Expanding train windows with disjoint forward tests and a purge gap.
 
-    Test dates are never reused by another test fold. The final ~20% of dates is
-    reserved as an untouched lockbox and never appears in train/test folds.
+    Test dates are never reused by another test fold. The last ~20% is reserved
+    within development and never appears in these folds. It is not final evidence;
+    the separate experiment registry precommits an actually future test window.
     """
     dates=sorted({x['date'] for x in cands});n=len(dates)
     if n<15:return [],set()
@@ -82,8 +86,21 @@ def _one_minute_status():
         return base
 
 
-def run_robust_validation(max_codes=40):
-    cands=_candidates(max(10,min(int(max_codes),100)));folds,lockbox=_date_slices(cands);results=[]
+def run_robust_validation(max_codes=40, *, registry_path=None, today=None):
+    today=today or datetime.now(ZoneInfo('Asia/Seoul')).date()
+    max_codes=max(10,min(int(max_codes),100))
+    record=experiments.active(registry_path)
+    scope=experiments.candidate_scope(registry_path)
+    codes=scope.get('codes') if record else [x['code'] for x in available_codes()[:max_codes]]
+    scope['codes']=codes
+    all_cands=[x for x in _candidates(max_codes,**scope) if str(x['date'])<today.isoformat()]
+    cands=experiments.development_candidates(all_cands,registry_path)
+    folds,development_holdout=_date_slices(cands);results=[]
+    settings={'maxCodes':max_codes,'universeCodes':codes,'filters':FILTERS,'exits':EXIT_CONFIGS,'regimes':REGIME_MODES,
+              'surges':SURGE_MODES,'entries':ENTRY_MODES,'plays':PLAY_MODES,
+              'commission':COMMISSION,'sellTax':SELL_TAX,'slippage':BASE_SLIPPAGE,
+              'folds':WF_FOLDS,'purgeDays':WF_PURGE_DAYS,'minTrainTrades':WF_MIN_TRAIN_TRADES,
+              'minFinalTrades':LOCKBOX_MIN_TRADES}
     for fold_no,(train,test) in enumerate(folds,1):
         ranked=[]
         for f in FILTERS:
@@ -109,27 +126,42 @@ def run_robust_validation(max_codes=40):
                         'surge':sm['id'],'entry':em['id'],'play':pm['id']})
     positive=sum(1 for x in results if x['test']['profitFactor']>1 and x['test']['expectancyPct']>0)
     required_positive=max(2,ceil(len(results)*.75)) if results else 0
+    selection=None
     if results:
-        winner=max(results,key=lambda x:(x['test']['profitFactor']>1 and x['test']['expectancyPct']>0,x['test']['expectancyPct'],x['test']['profitFactor']))
+        # Each fold selects on train only. Final candidate is the latest train
+        # winner, never the winner with the best test return across folds.
+        winner=results[-1]
         f=next(x for x in FILTERS if x['id']==winner['strategy']);cfg=next(x for x in EXIT_CONFIGS if x['id']==winner['exit'])
         rm=next(x for x in REGIME_MODES if x['id']==winner['market']);sm=next(x for x in SURGE_MODES if x['id']==winner['surge'])
         em=next(x for x in ENTRY_MODES if x['id']==winner['entry']);pm=next(x for x in PLAY_MODES if x['id']==winner['play'])
-        lock=_eval(cands,f,cfg,rm,sm,lockbox,entry_mode=em,play_mode=pm)
-        stress=_eval(cands,f,cfg,rm,sm,lockbox,BASE_SLIPPAGE*2,1,em,pm)
+        selection={'filter':f,'exit':cfg,'regime':rm,'surge':sm,'entry':em,'play':pm}
+        if record is None and len(results)>=3:
+            record=experiments.freeze(all_cands,selection,settings,path=registry_path,today=today)
+    lock=_metrics([]);stress=_metrics([])
+    experiment={'status':'INSUFFICIENT_DEVELOPMENT_DATA','finalEvidence':False}
+    selected=None
+    if record:
+        selection=record['manifest']['selection']
+        f,cfg,rm,sm,em,pm=(selection[k] for k in ('filter','exit','regime','surge','entry','play'))
         selected={'strategy':f['id'],'exit':cfg['id'],'entry':em['id'],'market':rm['id'],'surge':sm['id'],'play':pm['id']}
-    else:
-        lock={'trades':0,'profitFactor':0,'expectancyPct':0,'winRate':0,'avgWinPct':0,'avgLossPct':0,'payoffRatio':0,'maxDrawdownPct':0}
-        stress=dict(lock);selected=None
-    research_pass=bool(len(results)>=3 and positive>=required_positive and lock['trades']>=LOCKBOX_MIN_TRADES and
+        def final_evaluator(manifest):
+            dates={x['date'] for x in all_cands if manifest['lockboxStart']<=str(x['date'])<=manifest['lockboxEnd']}
+            return {'lockbox':_eval(all_cands,f,cfg,rm,sm,dates,entry_mode=em,play_mode=pm,with_account=True),
+                    'lockboxStress':_eval(all_cands,f,cfg,rm,sm,dates,BASE_SLIPPAGE*2,1,em,pm,with_account=True)}
+        experiment=experiments.evaluate_once(record,all_cands,settings,final_evaluator,path=registry_path,today=today)
+        if experiment.get('finalEvidence'):
+            lock=experiment['result']['lockbox'];stress=experiment['result']['lockboxStress']
+    research_pass=bool(experiment.get('finalEvidence') and len(results)>=3 and positive>=required_positive and lock['trades']>=LOCKBOX_MIN_TRADES and
         lock['profitFactor']>1 and lock['expectancyPct']>0 and stress['profitFactor']>=1 and stress['expectancyPct']>=0)
     one_min=_one_minute_status()
-    return {'ok':True,'version':'0.17.8','researchOnly':True,'qualityGate':'GOOD_ONLY',
+    return {'ok':True,'version':'0.17.16','researchOnly':True,'qualityGate':'GOOD_ONLY',
         'candidateTrades':len(cands),'selectedForLockbox':selected,
         'walkForward':{'method':'expanding-non-overlap-purged-v2','purgeDays':WF_PURGE_DAYS,
                        'minTrainTrades':WF_MIN_TRAIN_TRADES,'folds':len(results),
                        'positiveFolds':positive,'requiredPositiveFolds':required_positive,'results':results},
-        'lockbox':lock,'lockboxMinTrades':LOCKBOX_MIN_TRADES,'lockboxStress':stress,'oneMinuteExitValidation':one_min,
-        'pass':research_pass,'deploymentReady':bool(research_pass and one_min.get('ready')),
-        'gate':'GOOD data + purged/non-overlap walk-forward + final lockbox>=20 trades + 2x slippage/1bar-late 방어',
-        'deploymentGate':'research pass + KR 1m Exit Replay validation; NH simulation/micro-live는 별도 단계',
+        'experiment':experiment,'lockbox':lock,'lockboxMinTrades':LOCKBOX_MIN_TRADES,'lockboxStress':stress,'oneMinuteExitValidation':one_min,
+        'developmentHoldoutDays':len(development_holdout),
+        'pass':research_pass,'researchReplayReady':bool(research_pass and one_min.get('ready')),'deploymentReady':False,
+        'gate':'frozen future window + unchanged code/config/data + once-only final >=20 trades + 2x slippage/1bar-late',
+        'deploymentGate':'Real execution remains unimplemented; research results cannot authorize deployment.',
         'liveRuleAutoMutation':False,'realOrderEnabled':False}
