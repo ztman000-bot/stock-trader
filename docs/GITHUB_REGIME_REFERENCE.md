@@ -77,6 +77,30 @@ The aggregate contains, per date and market:
 - rolling turnover ratio
 - observational regime label (`STRESS`, `RISK_OFF`, `NEUTRAL`, `RISK_ON`, `RISK_ON_STRONG`)
 
+### Definition version 2 (v0.17.16)
+
+`schema_version=2` covers all supplied upstream issues in `universe_count`,
+`market_cap_total` and `top10_cap_share`, including suspended/no-trade rows.
+`active_count` and `active_market_cap_total` use positive-volume issues.
+Breadth uses active issues with finite reported returns; `missing_return_count`
+tracks the rest instead of calling them unchanged. `return_observation_count` is
+the breadth denominator.
+
+`equal_weight_change_pct` is the arithmetic mean of observed active returns;
+`median_change_pct` remains the median. The cap-weighted field uses **current-day**
+capitalization of observed active issues. It is a descriptive reference, not a
+lagged-weight investable index. Its compounded 20-day value must not be presented
+as portfolio performance. A missing daily return resets that rolling window;
+20 complete observations are required for the 20-day fields.
+
+The first v2 build refreshes every year so incompatible definitions are not mixed.
+Old v1 data remain readable while the new aggregate PR is pending. Status reports
+the version actually imported. Once v2 is imported, schema downgrades are rejected.
+The phone validates a complete snapshot before atomically replacing source rows;
+failed validation preserves the prior rows and sync metadata. Only aggregate facts
+are downloaded. Publication times from the historical source are not guaranteed,
+so date-only references cannot be used as same-day intraday available information.
+
 These labels are research annotations only. They are not Control entry filters, sizing
 rules, exit rules or live-order inputs.
 

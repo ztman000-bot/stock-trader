@@ -56,7 +56,8 @@ class ValidationHardeningTests(unittest.TestCase):
         compact = SRC.replace(' ', '')
         self.assertIn("'liveRuleAutoMutation':False", compact)
         self.assertIn("'realOrderEnabled':False", compact)
-        self.assertIn("'deploymentReady':bool(research_passandone_min.get('ready'))", compact)
+        self.assertIn("'researchReplayReady':bool(research_passandone_min.get('ready'))", compact)
+        self.assertIn("'deploymentReady':False", compact)
 
 
 if __name__ == '__main__':

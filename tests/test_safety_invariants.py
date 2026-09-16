@@ -96,7 +96,8 @@ class SafetyInvariantTests(unittest.TestCase):
         src = text("server/robust_validation.py").replace(" ", "")
         self.assertIn("'liveRuleAutoMutation':False", src)
         self.assertIn("'realOrderEnabled':False", src)
-        self.assertIn("'deploymentReady':bool(research_passandone_min.get('ready'))", src)
+        self.assertIn("'deploymentReady':False", src)
+        self.assertIn("'researchReplayReady':bool(research_passandone_min.get('ready'))", src)
 
     def test_capital_policy_has_no_order_dependency(self):
         src = text("server/capital_policy.py")

@@ -1,4 +1,4 @@
-"""KR 1-minute Exit Replay v0.17.8.
+"""KR 1-minute Exit Replay v0.17.16.
 
 Research/validation only. Replays the existing Control v0.8.0 exit rules against
 completed KR 1-minute bars. It never changes entries, exits, sizing, Paper state,
@@ -72,13 +72,14 @@ def _levels(entry, peak):
 
 
 def _gap_exit(entry, peak, price):
-    # For a discontinuous sample/gap use the exact live Control check order.
+    # Preserve Control reason priority. A discontinuity fills at the observed
+    # opening price, not at the trigger that the market has already crossed.
     if price <= entry * (1 - STOP_PCT):
-        return 'STOP_LOSS', entry * (1 - STOP_PCT)
+        return 'STOP_LOSS', price
     if peak >= entry * (1 + TRAIL_ACTIVATE_PCT) and price <= peak * (1 - TRAIL_PCT):
-        return 'TRAILING_STOP', peak * (1 - TRAIL_PCT)
+        return 'TRAILING_STOP', price
     if peak >= entry * (1 + BREAKEVEN_ACTIVATE_PCT) and price <= entry * (1 + BREAKEVEN_BUFFER_PCT):
-        return 'COST_COVER_PROTECT', entry * (1 + BREAKEVEN_BUFFER_PCT)
+        return 'COST_COVER_PROTECT', price
     return None, None
 
 
@@ -181,7 +182,7 @@ def paper_validation(limit=300):
     widths = [x['pnlRangePct'][1] - x['pnlRangePct'][0] for x in replayable if x.get('pnlRangePct')]
     validated = bool(n >= MIN_REPLAY_TRADES and agreement_pct >= MIN_PATH_AGREEMENT_PCT and
                      match_pct >= MIN_ACTUAL_REASON_MATCH_PCT)
-    return {'ok': True, 'engine': 'kr-1m-exit-replay-v1', 'engineConnected': True,
+    return {'ok': True, 'engine': 'kr-1m-exit-replay-v2-gap-aware', 'engineConnected': True,
             'closedPaperTrades': len(trades), 'replayableTrades': n,
             'pathAgreementPct': _f(agreement_pct, 1), 'actualReasonMatchPct': _f(match_pct, 1),
             'avgPnlRangeWidthPct': _f(mean(widths), 4) if widths else None,

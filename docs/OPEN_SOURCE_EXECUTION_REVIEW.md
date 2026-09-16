@@ -64,3 +64,11 @@ The execution layer remains blocked until all of the following exist and are tes
 - the existing strategy-validation gates remain satisfied.
 
 Control v0.8.0, Paper entry/exit/risk semantics, protected Celltrion handling and REAL ORDER OFF are unchanged.
+
+## v0.17.16 offline progress
+
+`execution_simulation.py` now implements an independent append-only simulation
+journal and fake-broker restart/reconciliation exercises. The research report runs
+seven scenarios twenty times each. This is not an NH adapter, persistent live order
+journal or completed NH lifecycle validation. The readiness contract keeps all live
+capability flags false. See `RESEARCH_INTEGRITY_V01716.md` for the exact boundary.

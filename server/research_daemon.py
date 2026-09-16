@@ -10,6 +10,7 @@ from strategy_lab import run_lab,run_exit_lab
 from profitability_lab import run_profitability_lab
 from robust_validation import run_robust_validation
 from benchmark_lab import run_benchmark_lab
+from execution_simulation import cached_simulation_report
 from data_quality import audit as data_quality_audit
 from stocks_in_play import scan as stocks_in_play_scan,snapshot_stats as stocks_snapshot_stats
 from historical_accumulator import start as history_start,status as history_status
@@ -50,12 +51,20 @@ def _empty_latest():
 def _read_out():
     with _OUT_LOCK:
         if OUT.exists():
-            try:return json.loads(OUT.read_text(encoding='utf-8'))
+            try:
+                data=json.loads(OUT.read_text(encoding='utf-8'))
+                if data.get('researchSchemaVersion')!=2:
+                    for key in ('profitability','robustValidation','benchmark','executionSimulation'):
+                        data.pop(key,None)
+                    data.update({'fullGeneratedAt':None,'researchSchemaVersion':2,
+                                 'summary':'연구 계산 방식이 갱신되었습니다. 새 정밀 연구 결과를 기다리는 중입니다. 이전 성적은 비교에서 제외합니다.'})
+                return data
             except:pass
         return _empty_latest()
 
 def _write_out(data):
     with _OUT_LOCK:
+        data['researchSchemaVersion']=2
         tmp=OUT.with_suffix('.tmp')
         tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
         tmp.replace(OUT)
@@ -86,15 +95,23 @@ def _benchmark_summary(bm):
     parts=[]
     for x in rows:
         full=x.get('full') or {};lock=x.get('lockbox') or {};stress=x.get('lockboxStress') or {}
-        parts.append(f"{x.get('name','-')} 전체PF {_fmt(full.get('profitFactor'))} / LockboxPF {_fmt(lock.get('profitFactor'))} / StressPF {_fmt(stress.get('profitFactor'))}")
-    return '공개전략 동일조건 비교: '+' | '.join(parts)+'. 단순 공개형이 Lockbox/Stress에서 더 좋다면 복잡한 전략 추가효과는 아직 입증되지 않은 것으로 판단합니다.'
+        parts.append(f"{x.get('name','-')} 전체PF {_fmt(full.get('profitFactor'))} / 개발 보류표본PF {_fmt(lock.get('profitFactor'))} / StressPF {_fmt(stress.get('profitFactor'))}")
+    return '공개전략 동일조건 개발 비교: '+' | '.join(parts)+'. 반복 열람하는 과거 비교 결과이며 최종 검증 증거가 아닙니다.'
 
 def _summary(p,r,q,hs,us,sip,ss,bm):
     b=p.get('best') or {};rd=p.get('readiness') or {};full=b.get('full') or {};oos=b.get('oos') or {};wf=r.get('walkForward') or {};lock=r.get('lockbox') or {};counts=q.get('counts') or {};top=(sip.get('rows') or [{}])[0] if sip else {}
     lines=[f"자동 연구 데이터 {hs.get('writtenBars',0):,}개 갱신, Universe Snapshot {us.get('snapshotDays',0)}일/{us.get('snapshotRows',0)}행. GOOD/PARTIAL/BAD={counts.get('GOOD',0)}/{counts.get('PARTIAL',0)}/{counts.get('BAD',0)}이며 PF 연구는 GOOD 데이터만 사용합니다.",f"Stocks-in-Play 시점기록 {ss.get('days',0)}일/{ss.get('rows',0)}행 축적 중. 현재 선두는 {top.get('name','-')}({top.get('code','-')}) 점수 {_fmt(top.get('score'))}이며 Cross 없이 독립적으로 기록합니다."]
     if b:lines.append(f"PF 연구 선두: {b.get('strategy')} / {b.get('entryMode')} / {b.get('exit')} / {b.get('stocksInPlayMode')}. 전체 {full.get('trades',0)}건 PF {_fmt(full.get('profitFactor'))}, 기대값 {_fmt(full.get('expectancyPct'),3)}%, 평균익 {_fmt(full.get('avgWinPct'),3)}%/평균손 {_fmt(full.get('avgLossPct'),3)}%, payoff {_fmt(full.get('payoffRatio'),2)}, OOS PF {_fmt(oos.get('profitFactor'))}.")
-    lines.append(_benchmark_summary(bm));lines.append(f"Walk-Forward {wf.get('folds',0)}구간 중 양수 {wf.get('positiveFolds',0)}구간. 개발에 사용하지 않은 Final Lockbox PF {_fmt(lock.get('profitFactor'))}, 기대값 {_fmt(lock.get('expectancyPct'),3)}%.")
-    one=r.get('oneMinuteExitValidation') or {};lines.append('1분봉 Exit 검증: '+('완료' if one.get('ready') else '대기 — '+str(one.get('reason','1분봉 데이터 필요'))));lines.append(f"실전 준비도 {rd.get('score',0)}/100. 최종판정: {'강건성 연구 게이트 통과' if r.get('pass') else '실전 승격 금지'}. Control v0.8.0 LOCKED · 자동 전략변경 OFF · REAL ORDER OFF.")
+    lines.append(_benchmark_summary(bm));lines.append(f"Walk-Forward {wf.get('folds',0)}구간 중 양수 {wf.get('positiveFolds',0)}구간.")
+    experiment=r.get('experiment') or {}
+    if experiment.get('finalEvidence'):
+        lines.append(f"고정 미래 검증 {experiment.get('lockboxStart')}~{experiment.get('lockboxEnd')}: PF {_fmt(lock.get('profitFactor'))}, 기대값 {_fmt(lock.get('expectancyPct'),3)}%. 동일 실험의 최종 결과는 재선정하지 않습니다.")
+    else:
+        lines.append(f"최종 검증 미완료: {experiment.get('status','대기')} · 고정 구간 {experiment.get('lockboxStart','미설정')}~{experiment.get('lockboxEnd','미설정')}. 42일은 연구 관찰창이며 충분한 수익성 증거를 보장하지 않습니다.")
+    account=full.get('account') or {}
+    if account:
+        lines.append(f"별도 연구 계좌: 순손익 {_fmt(account.get('netPnl'),0)}원, 수익률 {_fmt(account.get('returnPct'))}%, 계좌 MDD {_fmt(account.get('maxDrawdownPct'))}%. 현금·동시보유·5분 종가 평가손익 반영; Control 자금배분과 별개입니다.")
+    one=r.get('oneMinuteExitValidation') or {};lines.append('1분봉 Exit 검증: '+('연구 게이트 충족' if one.get('ready') else '대기 — '+str(one.get('reason','1분봉 데이터 필요'))));lines.append(f"연구지표 점수 {rd.get('score',0)}/100 (실전 준비도 아님). 최종판정: {'강건성 연구 게이트 통과' if r.get('pass') else '연구 증거 축적 중'}. Control v0.8.0 LOCKED · 자동 전략변경 OFF · REAL ORDER OFF.")
     return '\n\n'.join(lines)
 
 def _history_due():
@@ -156,6 +173,7 @@ def run_once():
             _STATE['phase']='universe-snapshot';us=_snapshot_universe();_STATE['phase']='stocks-in-play';sip=stocks_in_play_scan(20);ss=stocks_snapshot_stats();_STATE['phase']='data-quality';q=data_quality_audit();_STATE['phase']='strategy-backtest';s=run_lab(40);_STATE['phase']='market-research';m=run_market_lab(80);_STATE['phase']='overnight-research';overnight=_overnight_cache();_STATE['phase']='pf-entry-exit-research';p=run_profitability_lab(40);_STATE['phase']='robust-validation';r=run_robust_validation(40);_STATE['phase']='public-strategy-benchmark';bm=run_benchmark_lab(40,p,r)
         now=datetime.now().isoformat(timespec='seconds')
         data={'ok':True,'generatedAt':now,'fullGeneratedAt':now,'fastGeneratedAt':_FAST.get('lastRun'),'summary':_summary(p,r,q,hs,us,sip,ss,bm),'history':hs,'dataQuality':q,'universeSnapshot':us,'stocksInPlay':sip,'stocksInPlaySnapshots':ss,'market':m,'overnight':overnight,'strategy':s,'profitability':p,'robustValidation':r,'benchmark':bm,'fastCache':dict(_FAST),'pipeline':['fast-cache-before-history','stable-history-snapshot','universe-snapshot','stocks-in-play-point-in-time','GOOD-data-gate','strategy-backtest','market-research','overnight-research-cache','exit-intelligence-v2','pullback-entry','payoff-analysis','walk-forward','final-lockbox','cost-fill-stress','public-strategy-benchmark'],'safety':{'control':'v0.8.0 LOCKED','liveMutation':False,'realOrder':False,'liveSessionPriority':True,'qualityGate':'GOOD_ONLY','benchmarkAutoPromotion':False,'manualLabHeavyRun':False,'fastCacheAutoPromotion':False}}
+        data['executionSimulation']=cached_simulation_report()
         _write_out(data);_STATE.update({'lastRun':now,'lastError':None,'phase':'idle'});return data
     except Exception as e:_STATE.update({'lastError':f'{type(e).__name__}: {e}','phase':'error'});return {'ok':False,'error':_STATE['lastError']}
     finally:_STATE['running']=False
