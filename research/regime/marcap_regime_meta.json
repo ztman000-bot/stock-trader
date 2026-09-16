@@ -1,8 +1,17 @@
 {
   "controlStrategy": "v0.8.0 LOCKED",
+  "definitions": {
+    "availability": "end-of-day retrospective reference; no historical publication timestamp guaranteed",
+    "breadth": "positive-volume issues with finite reported returns; missing returns are not flat",
+    "cap_weighted_change_pct": "current-day capitalization weighted observed active returns; not an investable index",
+    "equal_weight_change_pct": "arithmetic mean of observed active-issue returns",
+    "market_cap_total": "all upstream issues, including no-trade/suspended rows",
+    "median_change_pct": "median of observed active-issue returns",
+    "weighted_return_20d": "compounded descriptive daily reference; not a tradable portfolio return"
+  },
   "firstDate": "1995-05-02",
-  "generatedAt": "2026-09-16T14:15:08+00:00",
-  "lastDate": "2026-09-14",
+  "generatedAt": "2026-09-16T19:42:35+00:00",
+  "lastDate": "2026-09-15",
   "markets": [
     "KOSDAQ",
     "KOSPI"
@@ -11,10 +20,10 @@
   "rawRowsRedistributed": false,
   "rawUpstreamCodeCopied": false,
   "realOrderEnabled": false,
-  "rowCount": 15464,
-  "schemaVersion": 1,
+  "rowCount": 15467,
+  "schemaVersion": 2,
   "source": "GITHUB_FINANCEDATA_MARCAP_AGG",
   "upstreamLicenseNote": "FinanceData/marcap reported no machine-readable repository licence when this adapter was created; retain attribution and use only compact aggregate research facts.",
-  "upstreamRef": "dd3ee7850205e49322bed2aed51443122bc31836",
+  "upstreamRef": "8c85d8637dad763356addf02aee7fde197b25087",
   "upstreamRepo": "FinanceData/marcap"
 }
