@@ -43,7 +43,7 @@ class NativeFastStartPerformanceTests(unittest.TestCase):
         self.assertNotIn('<script src="/js/strategy-lab-ui.js', index)
         self.assertNotIn('<script src="/js/market-lab-ui.js', index)
         self.assertNotIn('<script src="/js/final-results-ui.js', index)
-        self.assertIn('/js/app-safe.js?v=1789311000', index)
+        self.assertIn('/js/app-safe.js?v=1789603200', index)
 
     def test_hidden_research_panels_do_not_fetch_during_first_paint(self):
         final = text('js/final-results-ui.js')

@@ -7,7 +7,7 @@ ENVFILE="$SERVER/.env"
 PIDFILE="$HOME/stock-trader-offsite-backup.pid"
 LOG="$HOME/stock-trader-offsite-backup.log"
 PY="/data/data/com.termux/files/usr/bin/python"
-COMPONENT_VERSION="0.17.12"
+COMPONENT_VERSION="0.17.17"
 MAX_LOG_BYTES="${OFFSITE_BACKUP_MAX_LOG_BYTES:-2097152}"
 
 pid_alive(){

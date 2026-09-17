@@ -159,7 +159,7 @@
     if(res.status===409&&data.error==='이미 업데이트 중입니다.'){
       const headers=new Headers(res.headers);
       headers.set('content-type','application/json; charset=utf-8');
-      return new Response(JSON.stringify({ok:true,message:'이미 업데이트 중입니다. 완료될 때까지 기다립니다.',alreadyRunning:true}),{status:200,statusText:'OK',headers});
+      return new Response(JSON.stringify({ok:true,message:'이미 업데이트 중입니다. 완료될 때까지 기다립니다.',alreadyRunning:true,requestId:data.requestId}),{status:200,statusText:'OK',headers});
     }
 
     if(!res.ok&&data.error&&!data.detail){

@@ -1,4 +1,4 @@
-const ASSET_VERSION='1789005000';
+const ASSET_VERSION='1789603200';
 const CACHE=`stock-day-trader-live-v${ASSET_VERSION}-instant-resume-pwa-install-nativefix-1789140400`;
 const CORE_ASSETS=[
   '/classic',

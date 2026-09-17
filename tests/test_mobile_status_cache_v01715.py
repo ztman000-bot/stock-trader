@@ -37,7 +37,7 @@ class MobileStatusCacheTests(unittest.TestCase):
         self.assertIn('mobileCache', src)
         self.assertIn('SNAPSHOT · SYNCING', src)
         self.assertIn('매매 엔진은 계속 실행', src)
-        self.assertIn('/js/native-server-cache-state.js?v=1789311000', index)
+        self.assertIn('/js/native-server-cache-state.js?v=1789603200', index)
 
     def test_control_engine_constants_are_unchanged(self):
         app = text('server/app.py').replace(' ', '')
