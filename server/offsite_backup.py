@@ -1,7 +1,7 @@
 """Optional encrypted off-device database backup.
 
 Disabled by default. When explicitly enabled, this module creates a normal
-WAL-safe SQLite snapshot with db_backup.snapshot(), encrypts only that snapshot
+WAL-safe verified database set with db_backup.snapshot(), encrypts its tar archive
 with OpenSSL AES-256-CBC/PBKDF2, and uploads the ciphertext with HTTPS PUT.
 Credentials/passphrases are read from the phone's .env or an external secret
 file and are never written to Git, logs, or status output.
@@ -28,9 +28,9 @@ try:
 except Exception:
     pass
 
-from db_backup import snapshot as db_snapshot
+from db_backup import snapshot as db_snapshot, create_archive
 
-VERSION = '0.17.12'
+VERSION = '0.17.17'
 KST = ZoneInfo('Asia/Seoul')
 HOME = Path.home()
 STATE_FILE = HOME / '.stock-trader-offsite-backup-state.json'
@@ -78,6 +78,9 @@ def _save_result(result: dict):
         'lastError': result.get('error'),
         'lastCipherSha256': result.get('cipherSha256'),
         'lastBytes': result.get('bytes'),
+        'backupSchemaVersion': result.get('backupSchemaVersion'),
+        'databases': result.get('databases'),
+        'restoreVerified': result.get('restoreVerified', False),
     }
     if result.get('ok'):
         keep['lastSuccessAt'] = datetime.now(KST).isoformat(timespec='seconds')
@@ -144,7 +147,7 @@ def _encrypt_snapshot(src: Path):
         raise RuntimeError('openssl command is unavailable')
     if not secret:
         raise RuntimeError('offsite backup passphrase is not configured')
-    fd, tmp_name = tempfile.mkstemp(prefix='stock-trader-', suffix='.db.enc', dir=str(src.parent))
+    fd, tmp_name = tempfile.mkstemp(prefix='stock-trader-', suffix='.tar.enc', dir=str(src.parent))
     os.close(fd)
     dest = Path(tmp_name)
     env = os.environ.copy()
@@ -199,7 +202,7 @@ def _upload(cipher: Path):
         response = conn.getresponse()
         status = int(response.status)
         response.read(65536)
-        if status >= 400:
+        if not 200 <= status < 300:
             raise RuntimeError(f'backup upload HTTP {status}')
     finally:
         conn.close()
@@ -219,9 +222,13 @@ def run_once():
         result = {'ok': False, 'error': f"local snapshot failed: {snap.get('error') or 'unknown'}"}
         _save_result(result)
         return result
-    src = Path(snap['path'])
-    cipher = None
+    bundle = Path(snap['bundlePath'])
+    src = cipher = None
     try:
+        fd, archive_name = tempfile.mkstemp(prefix='.offsite-bundle-', suffix='.tar', dir=bundle.parent)
+        os.close(fd)
+        src = Path(archive_name)
+        create_archive(bundle, src)
         cipher = _encrypt_snapshot(src)
         size, digest = _upload(cipher)
         result = {
@@ -231,19 +238,27 @@ def run_once():
             'pbkdf2Iterations': PBKDF2_ITER,
             'bytes': size,
             'cipherSha256': digest,
-            'localSnapshot': src.name,
+            'localSnapshot': bundle.name,
+            'backupSchemaVersion': 2,
+            'databases': snap['databases'],
+            'restoreVerified': snap['restoreVerified'],
         }
     except Exception as exc:
         result = {'ok': False, 'error': f'{type(exc).__name__}: {exc}'[:500]}
     finally:
         if cipher is not None:
             cipher.unlink(missing_ok=True)
+        if src is not None:
+            src.unlink(missing_ok=True)
     _save_result(result)
     return result
 
 
 def _success_today(now):
-    value = _load_state().get('lastSuccessAt')
+    state = _load_state()
+    if state.get('backupSchemaVersion') != 2 or not state.get('restoreVerified'):
+        return False
+    value = state.get('lastSuccessAt')
     if not value:
         return False
     try:
@@ -266,7 +281,8 @@ def run_daemon():
 def status():
     state = _load_state()
     out = {'componentVersion': VERSION, **configuration_status()}
-    for key in ('lastAttemptAt', 'lastSuccessAt', 'lastOk', 'lastError', 'lastCipherSha256', 'lastBytes'):
+    for key in ('lastAttemptAt', 'lastSuccessAt', 'lastOk', 'lastError', 'lastCipherSha256', 'lastBytes',
+                'backupSchemaVersion', 'databases', 'restoreVerified'):
         if key in state:
             out[key] = state[key]
     out['secretsExposed'] = False

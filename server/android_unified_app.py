@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -16,11 +17,13 @@ from db_backup import snapshot as db_snapshot, status as db_backup_status
 from network_access import is_trusted_client_host
 from mobile_status_cache import install as install_mobile_status_cache
 from shadow_continuation import report as shadow_continuation_report
+import update_verification
 
 app = base.app
 install_mobile_status_cache(app)
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
+RUNNING_COMMIT = update_verification.git_commit(ROOT_DIR)
 ANDROID_UPDATE_SCRIPT = BASE_DIR / 'android_update.sh'
 ANDROID_WATCHDOG = BASE_DIR / 'android_watchdog_v2.sh'
 HEARTBEAT = Path.home() / '.stock-trader-app-heartbeat'
@@ -37,7 +40,7 @@ _DB_BACKUP_LOCK = threading.Lock()
 _DB_BACKUP_STATE = {'lastAttemptAt': None, 'lastResult': None, 'lastError': None}
 DB_BACKUP_AFTER_MINUTE = max(15 * 60 + 35, min(int(os.getenv('DB_BACKUP_AFTER_MINUTE', str(15 * 60 + 40))), 23 * 60 + 59))
 
-_UPDATE_PATHS = {'/api/system/update', '/api/system/update/run'}
+_UPDATE_PATHS = {'/api/system/update', '/api/system/update/run', '/api/system/update/status'}
 app.router.routes[:] = [
     route for route in app.router.routes
     if getattr(route, 'path', None) not in _UPDATE_PATHS
@@ -200,7 +203,10 @@ def _backup_status_safe():
 
 
 def _backup_done_today(now):
-    latest = (_backup_status_safe().get('latest') or {}).get('modifiedAt')
+    details = _backup_status_safe().get('latest') or {}
+    if not details.get('coverageComplete') or not details.get('restoreVerified'):
+        return False
+    latest = details.get('modifiedAt')
     if not latest:
         return False
     try:
@@ -238,12 +244,15 @@ def _start_daily_backup():
         ).start()
 
 
-def _launch_android_update(server_pid):
+def _launch_android_update(server_pid, request_id):
     log_path = Path.home() / 'stock-trader-update.log'
     try:
+        runner = update_verification.prepare_runner(ROOT_DIR)
         with log_path.open('a', encoding='utf-8') as log:
             proc = subprocess.Popen(
-                ['/data/data/com.termux/files/usr/bin/bash', str(ANDROID_UPDATE_SCRIPT), str(server_pid)],
+                [sys.executable, str(runner / 'update_verification.py'),
+                 '--root', str(ROOT_DIR), '--script', str(runner / 'android_update.sh'),
+                 '--request-id', request_id, '--server-pid', str(server_pid)],
                 cwd=str(ROOT_DIR),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -263,6 +272,7 @@ def _launch_android_update(server_pid):
                     'launcher': 'android-termux',
                 })
     except Exception as exc:
+        update_verification.mark(request_id, phase='FAILED', lastError=f'updater launch failed: {type(exc).__name__}')
         with base._UPDATE_LOCK:
             base._UPDATE.update({
                 'running': False,
@@ -283,8 +293,10 @@ def android_update_request(request):
         return JSONResponse({'ok': False, 'error': 'SAFETY BLOCK: APP_MODE=paper / ENABLE_TRADING=false 확인 필요'}, 409)
 
     with base._UPDATE_LOCK:
-        if base._UPDATE.get('running'):
-            return JSONResponse({'ok': False, 'error': '이미 업데이트 중입니다.'}, 409)
+        receipt = update_verification.receipt_status(RUNNING_COMMIT)
+        if receipt.get('running'):
+            return JSONResponse({'ok': False, 'error': '이미 업데이트 중입니다.',
+                                 'requestId': receipt.get('requestId')}, 409)
         opened, err = base._has_open_positions()
         if err:
             return JSONResponse({'ok': False, 'error': err}, 503)
@@ -297,6 +309,10 @@ def android_update_request(request):
                 'error': '추적 파일에 로컬 변경이 있어 업데이트를 차단했습니다.',
                 'dirty': dirty,
             }, 409)
+        try:
+            receipt = update_verification.new_request(ROOT_DIR, os.getpid())
+        except Exception as exc:
+            return JSONResponse({'ok': False, 'error': f'업데이트 기록 준비 실패: {type(exc).__name__}'}, 503)
         base._UPDATE.update({
             'running': True,
             'requestedAt': datetime.now().isoformat(),
@@ -306,14 +322,23 @@ def android_update_request(request):
 
     threading.Thread(
         target=_launch_android_update,
-        args=(os.getpid(),),
+        args=(os.getpid(), receipt['requestId']),
         name='android-safe-updater',
         daemon=True,
     ).start()
     return JSONResponse({
         'ok': True,
+        'requestId': receipt['requestId'],
+        'verificationProtocol': 1,
         'message': 'Android 안전 업데이트를 시작했습니다. Watchdog은 업데이트 중 일시정지되고 성공/롤백 후 자동 복귀합니다.',
     })
+
+
+def android_update_status(request):
+    return JSONResponse({'ok': True, 'releaseVersion': base.RELEASE_VERSION,
+                         'uiVersion': base.UI_VERSION, 'operationsVersion': '0.17.17',
+                         'runningCommit': RUNNING_COMMIT,
+                         'update': update_verification.receipt_status(RUNNING_COMMIT)})
 
 
 def android_liveness(request):
@@ -323,6 +348,7 @@ def android_liveness(request):
         'component': 'android-api',
         'reliabilityVersion': ANDROID_RELIABILITY_VERSION,
         'pid': os.getpid(),
+        'runningCommit': RUNNING_COMMIT,
         'mode': os.getenv('APP_MODE', 'paper'),
         'tradingEnabled': False,
         'safetyOk': _android_safety_ok(),
@@ -392,6 +418,7 @@ app.router.routes.extend([
     Route('/api/system/liveness', android_liveness),
     Route('/api/system/update', android_update_request, methods=['POST']),
     Route('/api/system/update/run', android_update_request, methods=['POST']),
+    Route('/api/system/update/status', android_update_status),
     Route('/api/system/android-watchdog', android_watchdog_status),
     Route('/api/research/shadow-continuation', android_shadow_continuation),
 ])

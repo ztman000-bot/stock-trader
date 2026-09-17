@@ -1,7 +1,7 @@
 // v0.17.15 read-only Data Health panel + fast-start UX.
 // Research/operations visibility only; never sends orders or mutates Control.
 const fmt=v=>v==null?'-':`${Number(v).toFixed(1)}%`;
-const DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v1';
+const DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v2';
 const DATA_HEALTH_CACHE_MAX_AGE=6*60*60*1000;
 let dataHealthBusy=false;
 
@@ -38,6 +38,9 @@ function coverageValue(x){
 }
 
 function coverageDetail(x){
+  if(!x?.calendar?.ok)return '거래일 기준표 확인 필요 · 정상 판정 보류';
+  const missing=(x.forwardWholeMissingDays||[]).length;
+  if(missing)return `하루 전체 누락 ${missing}일 · 기준 ${x.forwardBaselineDate||'-'}`;
   if(x?.forwardAverageCoveragePct!=null)return `Forward ${x.forwardDays||0}일 · 기준 ${x.forwardBaselineDate||'-'} · 과거 ${fmt(x.averageCoveragePct)}`;
   return `${(x?.incompleteDays||[]).length} incomplete day · Forward 기준 ${x?.forwardBaselineDate||'-'}`;
 }
@@ -70,7 +73,7 @@ function render(h,{cached=false,cachedAt=null}={}){
   const score=Number(h?.score||0);
   if(badge){
     badge.textContent=cached?`CACHED ${score.toFixed(1)}`:`${h?.grade||'UNKNOWN'} ${score.toFixed(1)}`;
-    badge.className='badge '+(cached?'':score>=90?'ok':score>=80?'':'badbadge');
+    badge.className='badge '+(cached?'':h?.calendar?.ok&&h?.readiness?.dataFoundationReady&&score>=90?'ok':score>=80&&h?.calendar?.ok?'':'badbadge');
   }
   const q5=h?.fiveMinuteOfficial||{};
   const q1=h?.oneMinute||{};
@@ -90,7 +93,9 @@ function render(h,{cached=false,cachedAt=null}={}){
     componentBox('Scanner Coverage',fmt(coverageValue(sc)),coverageDetail(sc)),
     componentBox('Decision Coverage',fmt(coverageValue(dc)),coverageDetail(dc)),
     componentBox('Exit Replay',ex.ready?'READY':'NOT READY',`${ex.replayableTrades||0} trades · coverage ${fmt(ex.replayCoveragePct)} · reason ${fmt(ex.actualReasonMatchPct)}`),
-    componentBox('DB',db.ok?'HEALTHY':'CHECK',`WAL ${(Number(db.walBytes||0)/1048576).toFixed(1)} MB · Backup ${db.backupFresh?'FRESH':db.backupAgeHours==null?'N/A':'OLD'}`),
+    componentBox('DB',db.ok?'HEALTHY':'CHECK',`WAL ${(Number(db.walBytes||0)/1048576).toFixed(1)} MB · Backup ${db.backupFresh?'FRESH':db.backupAgeHours==null?'N/A':'CHECK'}`),
+    componentBox('백업 복원 검사',db.backupRestoreVerified&&db.backupCoverageComplete?'VERIFIED':'CHECK',`${(db.backup?.latest?.databases||[]).length}개 DB · ${(db.backup?.latest?.missingDatabases||[]).join(', ')||'백업 상세 상태 기준'}`),
+    componentBox('거래일 기준표',h?.calendar?.ok?'REFERENCE':'UNKNOWN',`기한 ${h?.calendar?.validThrough||'-'} · 운영 참고용`),
   ].join('');
   const forwardActive=(sc.forwardDays||0)>0||(dc.forwardDays||0)>0;
   const gaps=forwardActive
@@ -104,7 +109,7 @@ function render(h,{cached=false,cachedAt=null}={}){
     const partial=m.last1mRepair;
     const partialRepair=partial?.repaired?.length?`PARTIAL 1m 복구 ${partial.repaired.length}건`:'PARTIAL 1m 정상/대기';
     const prefix=cached?'저장값 즉시 표시 · ':'';
-    note.textContent=`${prefix}${repairText(q5)} · ${gaps.length?`Forward INCOMPLETE_DAY: ${gaps.slice(-4).join(' · ')}`:'Forward Snapshot 기준 통과/수집대기'} · ${replayRepair} · ${partialRepair} · Exit ${ex.reason||'-'}`;
+    note.textContent=`${prefix}${repairText(q5)} · ${gaps.length?`Forward INCOMPLETE_DAY: ${gaps.slice(-4).join(' · ')}`:h?.calendar?.ok?'Forward Snapshot 기준 통과/수집대기':'CALENDAR_UNKNOWN · 거래일 기준표 갱신 필요'} · ${replayRepair} · ${partialRepair} · Exit ${ex.reason||'-'}`;
   }
 }
 

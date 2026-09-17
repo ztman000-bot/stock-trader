@@ -1,3 +1,4 @@
+import {startVerifiedUpdate} from './update-verification.js';
 // Native Android client usability + read-only Shadow research visibility.
 // The update action calls only the existing guarded Android updater; the Shadow
 // monitor uses GET-only research endpoints and never touches broker/order APIs.
@@ -68,63 +69,22 @@
     btn.textContent='확인 중';
     setUpdateStatus('현재 서버 상태 확인 중...');
 
-    let beforePid=null;
     try{
-      const live=await getJson(`/api/system/liveness?native_update_pre=${Date.now()}`);
-      beforePid=Number(live?.pid||0)||null;
-    }catch{}
-
-    try{
-      const r=await getJson('/api/system/update/run',{method:'POST',headers:{'Accept':'application/json'}});
-      setUpdateStatus(r?.message||'업데이트 요청 성공 · 안전검사/테스트/백업을 진행합니다.');
-      btn.textContent='업데이트 중';
+      const result=await startVerifiedUpdate((text,state)=>{
+        setUpdateStatus(text,state==='success'?'ok':state==='failed'?'bad':'info');
+        btn.textContent=state==='waiting'?'검증 중':'서버 업데이트';
+      });
+      setUpdateStatus(result.message,result.state==='success'?'ok':result.state==='failed'?'bad':'info');
+      btn.disabled=result.state==='waiting';
+      if(result.state==='success'){
+        await sleep(2000);
+        location.reload();
+      }
     }catch(err){
-      setUpdateStatus(`업데이트 차단/실패: ${err?.message||err}`,'bad');
+      setUpdateStatus(`업데이트 확인 실패: ${err?.message||err}`,'bad');
       btn.disabled=false;
       btn.textContent='서버 업데이트';
-      return;
     }
-
-    let sawOffline=false;
-    let lastError='';
-    for(let i=0;i<75;i++){
-      await sleep(2000);
-      try{
-        const live=await getJson(`/api/system/liveness?native_update_poll=${Date.now()}`);
-        const pid=Number(live?.pid||0)||null;
-        if(beforePid&&pid&&pid!==beforePid){
-          setUpdateStatus('업데이트 완료 · 새 서버 프로세스 재시작 확인 ✓','ok');
-          btn.textContent='완료';
-          await sleep(900);
-          location.reload();
-          return;
-        }
-        if(sawOffline&&live?.ok){
-          setUpdateStatus('서버 재연결 완료 · 최신 화면을 다시 불러옵니다.','ok');
-          btn.textContent='완료';
-          await sleep(900);
-          location.reload();
-          return;
-        }
-        try{
-          const st=await getJson(`/api/system/update/status?native_update_status=${Date.now()}`);
-          const u=st?.update||{};
-          if(u?.lastError){
-            lastError=String(u.lastError);
-            break;
-          }
-          if(u?.running)setUpdateStatus('업데이트 진행 중 · 테스트/DB 백업/서버 재시작 대기...');
-        }catch{}
-      }catch{
-        sawOffline=true;
-        setUpdateStatus('서버 재시작 중 · 자동 재연결 대기...');
-      }
-    }
-
-    if(lastError)setUpdateStatus(`업데이트 실패: ${lastError}`,'bad');
-    else setUpdateStatus('업데이트 완료 여부 확인 시간이 초과됐습니다. 새로고침 후 다시 확인하세요.','bad');
-    btn.disabled=false;
-    btn.textContent='서버 업데이트';
   }
 
   function deepCard(label,value,detail=''){

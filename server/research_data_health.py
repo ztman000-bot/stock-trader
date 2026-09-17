@@ -26,6 +26,7 @@ from kr_1m_research import (
     research_status as one_minute_status,
 )
 from one_minute_exit_replay import validation_status as exit_replay_status
+from session_coverage import calendar_window, session_coverage
 
 VERSION = '0.17.15'
 SNAPSHOT_EXPECTED_FULL = 78
@@ -139,91 +140,49 @@ def _forward_baseline_date():
         return value
 
 
-def _trading_dates(limit=8):
-    dates = set()
-    try:
-        with _conn() as c:
-            if _safe_table_exists(c, 'bars_1m'):
-                dates.update(str(r[0]) for r in c.execute(
-                    'SELECT DISTINCT session_date FROM bars_1m ORDER BY session_date DESC LIMIT ?',
-                    (max(1, int(limit) * 2),)
-                ).fetchall() if r[0])
-            if _safe_table_exists(c, 'bars_5m'):
-                dates.update(str(r[0]) for r in c.execute(
-                    "SELECT DISTINCT substr(bucket,1,10) d FROM bars_5m ORDER BY d DESC LIMIT ?",
-                    (max(1, int(limit) * 2),)
-                ).fetchall() if r[0])
-    except Exception:
-        pass
-    return sorted(dates)[-max(1, int(limit)):]
-
-
-def _expected_snapshots(day):
-    now = datetime.now(KST)
-    today = now.date().isoformat()
-    if day < today:
-        return SNAPSHOT_EXPECTED_FULL
-    if day > today or now.weekday() >= 5:
-        return 0
-    hm = now.hour * 60 + now.minute
-    if hm < 540:
-        return 0
-    capped = min(hm, 15 * 60 + 25)
-    return min(SNAPSHOT_EXPECTED_FULL, max(1, (capped - 540) // 5 + 1))
-
-
 def _snapshot_coverage(table, day_col='trade_date', at_col='snapshot_at', limit=5):
-    dates = _trading_dates(max(limit, 5))
+    # Expectations come from a separate calendar even when BOTH bar tables have
+    # no rows for a session. Never synthesize or backfill forward observations.
+    if table not in {'scanner_intel_snapshots', 'decision_intel_snapshots'}:
+        raise ValueError('unsupported snapshot table')
+    if (day_col, at_col) != ('trade_date', 'snapshot_at'):
+        raise ValueError('unsupported snapshot columns')
+    now = datetime.now(KST)
+    calendar = calendar_window(now, limit)
     baseline = _forward_baseline_date()
-    rows = []
+    rows, error = [], None
     try:
         with _conn() as c:
-            if not _safe_table_exists(c, table):
-                raise sqlite3.OperationalError(f'missing table {table}')
-            for day in dates[-limit:]:
-                expected = _expected_snapshots(day)
-                actual = int(c.execute(
-                    f'SELECT COUNT(DISTINCT {at_col}) FROM {table} WHERE {day_col}=?',
-                    (day,),
-                ).fetchone()[0])
-                coverage = min(100.0, _pct(actual, expected) or 0.0) if expected else None
-                rows.append({
-                    'date': day,
-                    'expectedSnapshots': expected,
-                    'actualSnapshots': actual,
-                    'coveragePct': coverage,
-                    'state': 'PENDING' if not expected else (
-                        'COMPLETE' if coverage >= SNAPSHOT_MIN_COVERAGE_PCT else 'INCOMPLETE_DAY'
-                    ),
-                    'forwardCohort': day >= baseline,
-                })
+            exists = _safe_table_exists(c, table)
+            if not exists:
+                error = f'missing table {table}'
+            for day in calendar['days']:
+                timestamps = [r[0] for r in c.execute(
+                    f'SELECT DISTINCT {at_col} FROM {table} WHERE {day_col}=?', (day,)
+                )] if exists else []
+                rows.append({**session_coverage(day, timestamps, now, SNAPSHOT_MIN_COVERAGE_PCT),
+                             'forwardCohort': day >= baseline})
     except Exception as exc:
-        return {
-            'ok': False,
-            'error': f'{type(exc).__name__}: {exc}',
-            'days': rows,
-            'minCoveragePct': SNAPSHOT_MIN_COVERAGE_PCT,
-            'forwardBaselineDate': baseline,
-        }
+        error = f'{type(exc).__name__}: {exc}'
     usable = [x for x in rows if x['coveragePct'] is not None]
     forward = [x for x in usable if x['forwardCohort']]
     avg = round(sum(x['coveragePct'] for x in usable) / len(usable), 2) if usable else None
-    forward_avg = (
-        round(sum(x['coveragePct'] for x in forward) / len(forward), 2)
-        if forward else None
-    )
-    latest = usable[-1] if usable else None
+    forward_avg = round(sum(x['coveragePct'] for x in forward) / len(forward), 2) if forward else None
     return {
-        'ok': True,
+        'ok': bool(calendar['ok'] and error is None),
+        'error': error,
+        'calendar': calendar,
         'expectedFullDaySnapshots': SNAPSHOT_EXPECTED_FULL,
         'minCoveragePct': SNAPSHOT_MIN_COVERAGE_PCT,
         'averageCoveragePct': avg,
         'forwardBaselineDate': baseline,
         'forwardAverageCoveragePct': forward_avg,
         'forwardDays': len(forward),
-        'latestTradingDay': latest,
+        'latestTradingDay': usable[-1] if usable else None,
         'incompleteDays': [x['date'] for x in usable if x['state'] == 'INCOMPLETE_DAY'],
         'forwardIncompleteDays': [x['date'] for x in forward if x['state'] == 'INCOMPLETE_DAY'],
+        'wholeMissingDays': [x['date'] for x in usable if x['wholeDayMissing']],
+        'forwardWholeMissingDays': [x['date'] for x in forward if x['wholeDayMissing']],
         'days': rows,
         'futureDataBackfillAllowed': False,
     }
@@ -314,7 +273,9 @@ def _backup_freshness(backup):
         limit = 84 if now.weekday() >= 5 else 36
         return {
             'backupAgeHours': round(age, 1),
-            'backupFresh': age <= limit,
+            'backupFresh': bool(age <= limit and latest.get('coverageComplete') and latest.get('restoreVerified')),
+            'backupCoverageComplete': bool(latest.get('coverageComplete')),
+            'backupRestoreVerified': bool(latest.get('restoreVerified')),
             'backupFreshLimitHours': limit,
         }
     except Exception:
@@ -406,10 +367,18 @@ def report(force=False):
         'HEALTHY' if score >= 95 else 'GOOD' if score >= 90 else
         'WATCH' if score >= 80 else 'NEEDS_ATTENTION'
     )
+    calendar_ready = bool((scanner.get('calendar') or {}).get('ok')
+                          and (decision.get('calendar') or {}).get('ok'))
+    if not calendar_ready:
+        grade = 'CALENDAR_UNKNOWN'
+    elif not scanner.get('ok') or not decision.get('ok'):
+        grade = 'NEEDS_ATTENTION'
     scanner_latest = scanner.get('latestTradingDay') or {}
     decision_latest = decision.get('latestTradingDay') or {}
     foundation_ready = bool(
-        q1.get('dataReady')
+        calendar_ready and scanner.get('ok') and decision.get('ok')
+        and not scanner.get('forwardWholeMissingDays') and not decision.get('forwardWholeMissingDays')
+        and q1.get('dataReady')
         and float(q5.get('officialGoodPct') or 0) >= OFFICIAL_5M_TARGET_PCT
         and float(scanner_latest.get('coveragePct') or 0) >= SNAPSHOT_MIN_COVERAGE_PCT
         and float(decision_latest.get('coveragePct') or 0) >= SNAPSHOT_MIN_COVERAGE_PCT
@@ -427,6 +396,8 @@ def report(force=False):
     out = {
         'ok': True,
         'version': VERSION,
+        'operationsVersion': '0.17.17',
+        'calendar': scanner.get('calendar'),
         'generatedAt': datetime.now(KST).isoformat(timespec='seconds'),
         'score': score,
         'grade': grade,

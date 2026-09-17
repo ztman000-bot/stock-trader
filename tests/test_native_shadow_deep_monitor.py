@@ -17,7 +17,7 @@ class NativeShadowDeepMonitorTests(unittest.TestCase):
         self.assertNotIn("Route('/api/research/shadow-continuation', android_shadow_continuation, methods=['POST'])",src)
 
     def test_native_monitor_shows_cumulative_research_metrics(self):
-        src=text('js/native-client-fixes.js')
+        src=text('js/native-client-fixes.js')+text('js/update-verification.js')
         for marker in (
             '/api/research/shadow-continuation',
             'Shadow 누적 연구',
@@ -32,7 +32,7 @@ class NativeShadowDeepMonitorTests(unittest.TestCase):
         self.assertIn('setInterval(refreshDeepShadow,30000)',src)
 
     def test_native_monitor_is_read_only_except_guarded_server_update(self):
-        src=text('js/native-client-fixes.js')
+        src=text('js/native-client-fixes.js')+text('js/update-verification.js')
         self.assertIn("'/api/system/update/run'",src)
         self.assertIn("method:'POST'",src.replace(' ',''))
         for forbidden in (

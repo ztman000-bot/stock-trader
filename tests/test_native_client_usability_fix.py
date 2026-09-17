@@ -17,17 +17,19 @@ class NativeClientUsabilityFixTests(unittest.TestCase):
         self.assertIn('afterFirstPaint',src)
 
     def test_native_fix_leaves_scroll_clearance_for_fixed_bottom_nav(self):
-        src=text('js/native-client-fixes.js')
+        src=text('js/native-client-fixes.js')+text('js/update-verification.js')
         self.assertIn('padding-bottom:calc(126px + env(safe-area-inset-bottom))',src)
         self.assertIn('padding-bottom:calc(138px + env(safe-area-inset-bottom))',src)
         self.assertIn('-webkit-overflow-scrolling:touch',src)
 
     def test_native_update_button_uses_only_guarded_system_updater(self):
-        src=text('js/native-client-fixes.js')
+        src=text('js/native-client-fixes.js')+text('js/update-verification.js')
         self.assertIn('서버 업데이트',src)
         self.assertIn("'/api/system/update/run'",src)
         self.assertIn('/api/system/update/status',src)
-        self.assertIn('/api/system/liveness',src)
+        self.assertIn('/api/system/liveness',text('server/update_verification.py'))
+        self.assertIn('localSafetyPassed===true',src)
+        self.assertIn('u.targetSha===status.runningCommit',src)
         self.assertIn("method:'POST'",src.replace(' ',''))
         self.assertNotIn('/api/nh/order',src)
         self.assertNotIn('/api/paper/enter',src)

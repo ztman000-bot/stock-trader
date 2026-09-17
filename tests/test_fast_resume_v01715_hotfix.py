@@ -41,7 +41,7 @@ class FastResumeHotfixTests(unittest.TestCase):
 
     def test_data_health_uses_stale_while_refresh_display(self):
         src = text('js/data-health-ui.js')
-        self.assertIn("DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v1'", src)
+        self.assertIn("DATA_HEALTH_CACHE_KEY='stock-trader-data-health-cache-v2'", src)
         self.assertIn('cacheRead()', src)
         self.assertIn('cacheWrite(h)', src)
         self.assertIn('restoreCachedHealth()', src)

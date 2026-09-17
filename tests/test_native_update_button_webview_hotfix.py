@@ -10,13 +10,13 @@ def text(path):
 
 class NativeUpdateButtonWebViewHotfixTests(unittest.TestCase):
     def test_hotfix_avoids_javascript_confirm_dialog(self):
-        src=text('js/native-update-button-hotfix.js')
+        src=text('js/native-update-button-hotfix.js')+text('js/update-verification.js')
         self.assertNotIn('confirm(',src)
         self.assertIn('한 번 더 누르기',src)
         self.assertIn("btn.dataset.confirmUntil",src)
 
     def test_hotfix_calls_only_guarded_server_update_mutation(self):
-        src=text('js/native-update-button-hotfix.js')
+        src=text('js/native-update-button-hotfix.js')+text('js/update-verification.js')
         self.assertIn("'/api/system/update/run'",src)
         self.assertIn("method:'POST'",src.replace(' ',''))
         self.assertNotIn('/api/nh/order',src)
@@ -24,10 +24,11 @@ class NativeUpdateButtonWebViewHotfixTests(unittest.TestCase):
         self.assertNotIn('ENABLE_TRADING',src)
 
     def test_hotfix_gives_immediate_visible_feedback(self):
-        src=text('js/native-update-button-hotfix.js')
+        src=text('js/native-update-button-hotfix.js')+text('js/update-verification.js')
         self.assertIn('업데이트 요청을 서버로 전송 중',src)
         self.assertIn('업데이트 요청 접수됨',src)
-        self.assertIn('업데이트 완료 · 새 서버 재시작 확인',src)
+        self.assertIn('업데이트 완료 · 코드',src)
+        self.assertIn('referenceVerified===true',src)
 
     def test_control_remains_locked(self):
         app=text('server/app.py').replace(' ','')
