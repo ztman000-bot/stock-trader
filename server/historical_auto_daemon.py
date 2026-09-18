@@ -110,7 +110,7 @@ def run_once() -> dict[str, object]:
     }
 
 
-def run(instance_version: str = "0.17.15-historical-auto-3") -> int:
+def run(instance_version: str = "0.17.17-historical-auto-4") -> int:
     print(
         f"[HIST] GitHub-regime-first historical research daemon started ({instance_version}); REAL ORDER OFF",
         flush=True,
@@ -201,7 +201,7 @@ def run(instance_version: str = "0.17.15-historical-auto-3") -> int:
 def _cli() -> int:
     parser = argparse.ArgumentParser(description="GitHub-regime-first historical research daemon")
     parser.add_argument("command", nargs="?", choices=("status", "once", "daemon"), default="daemon")
-    parser.add_argument("--instance-version", default="0.17.15-historical-auto-3")
+    parser.add_argument("--instance-version", default="0.17.17-historical-auto-4")
     args = parser.parse_args()
     if args.command == "status":
         print(json.dumps(source_status(), ensure_ascii=False, indent=2))

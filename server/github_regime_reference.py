@@ -30,6 +30,9 @@ CONTROL_STRATEGY = "v0.8.0 LOCKED"
 REAL_ORDER_ENABLED = False
 RESEARCH_ONLY = True
 DEFAULT_SUMMARY_URL = "https://raw.githubusercontent.com/ztman000-bot/stock-trader/main/research/regime/marcap_regime_daily.csv"
+# HTTP freshness and parser freshness are different. Bump this when an importer
+# change requires an unchanged aggregate to be parsed again on existing phones.
+IMPORTER_REVISION = "regime-csv-v2-1"
 MAX_SUMMARY_BYTES = 12 * 1024 * 1024
 REQUIRED_FIELDS = {
     "trade_date",
@@ -260,6 +263,7 @@ def import_summary_text(text: str, path: str | os.PathLike[str] | None = None, *
             "last_date": last or "",
             "last_import_rows": str(written),
             "schema_version": str(schema_version),
+            "importer_revision": IMPORTER_REVISION,
         }
         for key, value in meta.items():
             c.execute(
@@ -286,23 +290,50 @@ def _meta(key: str, path: str | os.PathLike[str] | None = None) -> str | None:
         return str(row[0]) if row else None
 
 
-def sync_summary(path: str | os.PathLike[str] | None = None, *, opener=urlopen, timeout: float = 30.0) -> dict[str, object]:
+def _sync_cache(path, url):
+    init_db(path)
+    with connect(path) as c:
+        meta = dict(c.execute("SELECT key,value FROM regime_meta").fetchall())
+        rows, first_schema, last_schema = c.execute(
+            "SELECT COUNT(*),MIN(COALESCE(schema_version,1)),MAX(COALESCE(schema_version,1)) "
+            "FROM regime_daily WHERE source=?", (SOURCE,),
+        ).fetchone()
+    valid = bool(
+        rows > 0 and str(rows) == meta.get('last_import_rows')
+        and first_schema == last_schema and str(first_schema) == meta.get('schema_version')
+        and meta.get('summary_url') == url
+        and meta.get('importer_revision') == IMPORTER_REVISION
+    )
+    return {'etag': meta.get('etag') if valid else None,
+            'importedWithRevision': meta.get('importer_revision'),
+            'reimportRequired': not valid}
+
+
+def sync_summary(path: str | os.PathLike[str] | None = None, *, opener=urlopen, timeout: float = 30.0,
+                 force: bool = False) -> dict[str, object]:
     if not reference_enabled():
         return {"ok": True, "disabled": True, "researchOnly": True, "realOrderEnabled": False}
     url = summary_url()
     headers = {"Accept": "text/csv,text/plain;q=0.9,*/*;q=0.1", "User-Agent": "stock-trader-regime-reference/0.17.15"}
-    etag = _meta("etag", path)
+    cache = _sync_cache(path, url)
+    etag = cache['etag'] if not force else None
     if etag:
         headers["If-None-Match"] = etag
+    else:
+        headers['Cache-Control'] = 'no-cache'
     request = Request(url, headers=headers, method="GET")
     try:
-        response = opener(request, timeout=timeout)
-        raw = response.read(MAX_SUMMARY_BYTES + 1)
-        if len(raw) > MAX_SUMMARY_BYTES:
-            raise ValueError("regime summary exceeds safety size limit")
-        response_etag = str(response.headers.get("ETag") or "").strip() if getattr(response, "headers", None) else ""
+        with opener(request, timeout=timeout) as response:
+            raw = response.read(MAX_SUMMARY_BYTES + 1)
+            if len(raw) > MAX_SUMMARY_BYTES:
+                return {'ok': False, 'error': 'regime summary exceeds safety size limit',
+                        'researchOnly': True, 'realOrderEnabled': False}
+            response_etag = str(response.headers.get("ETag") or "").strip() if getattr(response, "headers", None) else ""
     except HTTPError as exc:
         if exc.code == 304:
+            if not etag or _sync_cache(path, url)['reimportRequired']:
+                return {'ok': False, 'error': 'unexpected HTTP 304: local aggregate requires reimport',
+                        'researchOnly': True, 'realOrderEnabled': False}
             return {"ok": True, "notModified": True, "researchOnly": True, "realOrderEnabled": False}
         return {"ok": False, "error": f"github summary HTTP {exc.code}", "researchOnly": True, "realOrderEnabled": False}
     except (URLError, TimeoutError) as exc:
@@ -363,6 +394,8 @@ def collector_status(path: str | os.PathLike[str] | None = None) -> dict[str, ob
         "summaryUrlHost": urlparse(summary_url()).hostname,
         "rawPerStockStoredOnPhone": False,
         "referenceTiming": "retrospective end-of-day; not intraday point-in-time evidence",
+        "importerRevision": IMPORTER_REVISION,
+        **{key: value for key, value in _sync_cache(path, summary_url()).items() if key != 'etag'},
     }
 
 
@@ -371,10 +404,13 @@ def _cli() -> int:
     parser = argparse.ArgumentParser(description="GitHub market-regime aggregate reference")
     parser.add_argument("command", nargs="?", choices=("status", "sync"), default="status")
     parser.add_argument("--db", default=str(DB_PATH))
+    parser.add_argument("--force", action="store_true", help="re-download and validate the complete compact aggregate")
     args = parser.parse_args()
-    result = collector_status(args.db) if args.command == "status" else sync_summary(args.db)
+    if args.force and args.command != 'sync':
+        parser.error('--force is only valid with sync')
+    result = collector_status(args.db) if args.command == "status" else sync_summary(args.db, force=args.force)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result.get('ok') else 1
 
 
 if __name__ == "__main__":
