@@ -101,6 +101,43 @@ failed validation preserves the prior rows and sync metadata. Only aggregate fac
 are downloaded. Publication times from the historical source are not guaranteed,
 so date-only references cannot be used as same-day intraday available information.
 
+### Existing-phone parser upgrades and HTTP cache
+
+An old importer may already have downloaded the v2 CSV while ignoring its new
+columns. Its saved ETag can therefore match the current remote file even though
+the local database still reports schema 1. `notModified` alone is not proof of a
+completed data-format migration.
+
+Conditional requests are now allowed only when the saved importer revision and
+source URL match, and local source row count/schema agree with import metadata.
+Old, empty, partial, or mixed-schema databases request a full compact CSV again.
+Successful validation and transactional import record the new parser revision
+together with the data and ETag. Download/validation failure preserves the prior
+data and leaves migration pending. Unexpected HTTP 304 responses cannot complete
+a required reimport. Bump `IMPORTER_REVISION` for future parser changes requiring
+the same source bytes to be processed again.
+
+`status` exposes `importerRevision`, `importedWithRevision`, and `reimportRequired`.
+`lastSyncAt` remains the last successful import time; HTTP 304 does not rewrite it.
+The Android historical supervisor version is bumped so old in-memory importer code
+is restarted on server update. The native updater's existing post-restart regime
+check then calls the corrected sync path.
+
+For an explicit retry, run on the **server phone**, after updating its code:
+
+```bash
+cd ~/stock-trader
+python server/github_regime_reference.py sync --force
+python server/github_regime_reference.py status
+```
+
+`--force` bypasses only HTTP conditional caching. It does not bypass validation,
+change the configured source, download raw stock data, or clear the old database
+before successful replacement. A failed CLI sync exits nonzero. With the current
+merged v2 aggregate, both KOSPI and KOSDAQ should report `schemaVersion: 2` and
+`reimportRequired: false`. Valid v1 snapshots remain importable for compatibility
+until v2 has been imported; the existing downgrade rejection remains in force.
+
 These labels are research annotations only. They are not Control entry filters, sizing
 rules, exit rules or live-order inputs.
 

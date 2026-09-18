@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 HOME=/data/data/com.termux/files/home
 PIDFILE="$HOME/stock-trader-krx-official.pid"
 LOGFILE="$HOME/stock-trader-krx-official.log"
-INSTANCE_VERSION="0.17.15-historical-auto-3"
+INSTANCE_VERSION="0.17.17-historical-auto-4"
 DAEMON="$PWD/historical_auto_daemon.py"
 
 pid_valid(){
